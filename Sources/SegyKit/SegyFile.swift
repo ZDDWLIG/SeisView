@@ -77,7 +77,18 @@ public final class SegyFile {
 
         var ns = bh.ns
         if ns <= 0 { ns = th.ns }                       // 二进制头 ns 非法则回退道头
-        else if th.ns > 0 && th.ns != ns { ns = th.ns } // 不一致以道头为准
+        else if th.ns > 0 && th.ns != ns {
+            // 二进制头与道头不一致时，以与文件大小吻合的那个 ns 为准；
+            // 都吻合（或都不吻合）时以二进制头为准（SEG-Y rev1 权威字段）。
+            // 真实文件（如 big-file）的道头 ns 可能不可靠（本文件道头=1985，
+            // 而二进制头=4000 才与文件大小 该文件大小 整除吻合，segyio 亦报 4000）。
+            let bytes = format.bytesPerSample
+            func consistent(_ v: Int) -> Bool {
+                let tb = UInt64(240 + v * bytes)
+                return tb > 0 && (size - extOffset) % tb == 0
+            }
+            if !consistent(ns) && consistent(th.ns) { ns = th.ns }
+        }
         guard ns > 0 else { throw SegyError.badSampleCount(binaryHeader: bh.ns, traceHeader: th.ns) }
 
         let traceBytes = 240 + ns * format.bytesPerSample

@@ -171,6 +171,46 @@ func runAll() {
     h.check(shots[0] == Shot(ffid: 100, firstTrace: 0, count: 60), "shot 1")
     h.check(shots[1] == Shot(ffid: 200, firstTrace: 60, count: 60), "shot 2")
 
+    // Task 10: 真实文件黄金测试（vs segyio）+ 性能回归
+    // 期望值由 segyio 生成（见 report），ns=4000, nTraces=589248,
+    // vals = [t0s0..t0s9, t1s0..t1s9, t2s0..t2s9]
+    let bigPath = ProcessInfo.processInfo.environment["SEGY_BIG_FILE"] ??
+        "/path/to/big.segy"
+    let bf = try! SegyFile.open(url: URL(fileURLWithPath: bigPath))
+    h.check(bf.geometry.ns == 4000, "big file ns")
+    h.check(bf.geometry.nTraces == 589248, "big file nTraces")
+    let rdr2 = TraceReader(file: bf, maxThreads: 8)
+    let first = rdr2.readDecoded(traceRange: 0..<3, sampleRange: 0..<10)
+    h.check(first.count == 30, "big file 3×10 count")
+    let gold: [Float] = [
+        // trace 0 (samples 0-9)
+        4.539411747828126e-05, -0.00016471336130052805, 0.00017713110719341785,
+        -0.00025798031128942966, 0.0001991456956602633, -4.750918014906347e-05,
+        4.395961877889931e-05, -8.894057828001678e-05, -4.121581150684506e-05,
+        1.1413279025873635e-05,
+        // trace 1 (samples 0-9)
+        0.0002916385419666767, -0.000205475022085011, 0.00014127494068816304,
+        -5.595973925665021e-05, -2.4273567760246806e-06, -2.3605942260473967e-05,
+        -3.961613401770592e-05, -9.24542109714821e-05, -3.0440889531746507e-05,
+        -0.0001222032733494416,
+        // trace 2 (samples 0-9)
+        0.0007365562487393618, -0.0004857792519032955, 0.0003083455376327038,
+        -8.62692977534607e-05, 4.334631375968456e-05, -8.490505933878012e-06,
+        6.003121961839497e-05, 3.556542651494965e-06, -2.416834468021989e-05,
+        3.818098048213869e-05,
+    ]
+    for i in 0..<30 {
+        // 三道的第 0/10/20 个值 = 各道首采样，尤其能暴露 traceBytes 步长错误
+        h.checkRel(first[i], gold[i], 1e-3, "gold trace\(i / 10) sample\(i % 10) (idx \(i))")
+    }
+
+    // 性能回归：8 线程读一屏（1200 道 × 4000 采样）应 < 120 ms
+    let perf = TraceReader(file: bf, maxThreads: 8)
+    let t0 = DispatchTime.now().uptimeNanoseconds
+    _ = perf.readDecoded(traceRange: 0..<1200, sampleRange: nil)
+    let perfMs = Double(DispatchTime.now().uptimeNanoseconds - t0) / 1e6
+    h.check(perfMs < 120, "perf: 1200 traces < 120ms (got \(perfMs)ms)")
+
     h.finish()
 }
 runAll()
