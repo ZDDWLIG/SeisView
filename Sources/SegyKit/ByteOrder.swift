@@ -1,5 +1,3 @@
-public enum ByteOrder: Sendable { case big, little }
-
 public enum ByteOrderReader {
     @inlinable
     public static func u16(_ p: UnsafeRawPointer, _ o: ByteOrder) -> UInt16 {
