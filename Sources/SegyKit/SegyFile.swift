@@ -22,8 +22,10 @@ public final class SegyFile {
     public let geometry: Geometry
     public let binaryHeader: BinaryHeader
     public let fileSize: UInt64
-    public init(url: URL, geometry: Geometry, binaryHeader: BinaryHeader, fileSize: UInt64) {
+    public let formatWasCorrected: Bool
+    public init(url: URL, geometry: Geometry, binaryHeader: BinaryHeader, fileSize: UInt64, formatWasCorrected: Bool) {
         self.url = url; self.geometry = geometry; self.binaryHeader = binaryHeader; self.fileSize = fileSize
+        self.formatWasCorrected = formatWasCorrected
     }
 
     public static func parseBinaryHeader(_ raw: [UInt8]) -> BinaryHeader {
@@ -62,9 +64,11 @@ public final class SegyFile {
 
         // 格式码校验 + 小端回退
         var order: ByteOrder = .big
-        guard let format = sampleFormat(for: bh.formatCode, order: &order) else {
+        var format: SampleFormat
+        guard let resolvedFormat = sampleFormat(for: bh.formatCode, order: &order) else {
             throw SegyError.invalidFormatCode(bh.formatCode)
         }
+        format = resolvedFormat
 
         let extOffset = UInt64(3600 + bh.extTextHeaders * 3200)
         // 畸形头可能声称大量扩展文本头，extOffset 超过实际文件大小；
@@ -91,6 +95,15 @@ public final class SegyFile {
         }
         guard ns > 0 else { throw SegyError.badSampleCount(binaryHeader: bh.ns, traceHeader: th.ns) }
 
+        // 假 IBM 真 IEEE 自动校正：声明 IBM 但首道数据按 IEEE 解码明显更合理时，改为 IEEE
+        var corrected = false
+        if format == .ibm32 {
+            let probe = readFirstSamples(fd, firstOffset: extOffset, count: min(256, ns), declared: .ibm32)
+            let asIBM = sanityScore(probe.ibm)
+            let asIEEE = sanityScore(probe.ieee)
+            if asIEEE > asIBM * 3 { format = .ieee32; corrected = true }  // IEEE 明显更合理
+        }
+
         let traceBytes = 240 + ns * format.bytesPerSample
         let dataBytes = size - extOffset
         guard dataBytes % UInt64(traceBytes) == 0 else {
@@ -100,7 +113,28 @@ public final class SegyFile {
 
         let geo = Geometry(ns: ns, dtMicros: bh.dtMicros, format: format, byteOrder: order,
                            firstTraceOffset: extOffset, traceBytes: traceBytes, nTraces: nTraces)
-        return SegyFile(url: url, geometry: geo, binaryHeader: bh, fileSize: size)
+        return SegyFile(url: url, geometry: geo, binaryHeader: bh, fileSize: size, formatWasCorrected: corrected)
+    }
+
+    private static func readFirstSamples(_ fd: Int32, firstOffset: UInt64, count: Int,
+                                         declared: SampleFormat) -> (ibm: [Float], ieee: [Float]) {
+        var raw = [UInt8](repeating: 0, count: count * 4)
+        let byteCount = raw.count
+        _ = raw.withUnsafeMutableBytes { pread(fd, $0.baseAddress, byteCount, off_t(firstOffset) + 240) }
+        var ibm = [Float](repeating: 0, count: count)
+        var ieee = [Float](repeating: 0, count: count)
+        raw.withUnsafeBytes { rb in
+            Decoder.decode(bytes: rb.baseAddress!, count: count, format: .ibm32, order: .big, into: &ibm)
+            Decoder.decode(bytes: rb.baseAddress!, count: count, format: .ieee32, order: .big, into: &ieee)
+        }
+        return (ibm, ieee)
+    }
+
+    private static func sanityScore(_ v: [Float]) -> Double {
+        // 合理样本占比：有限且绝对振幅落在 [1e-6, 1e6] 内的比例
+        var ok = 0
+        for x in v where x.isFinite && abs(x) >= 1e-6 && abs(x) <= 1e6 { ok += 1 }
+        return Double(ok) / Double(max(1, v.count))
     }
 
     public static func sampleFormat(for code: Int, order: inout ByteOrder) -> SampleFormat? {

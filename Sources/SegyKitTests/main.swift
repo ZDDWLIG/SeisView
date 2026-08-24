@@ -211,6 +211,30 @@ func runAll() {
     let perfMs = Double(DispatchTime.now().uptimeNanoseconds - t0) / 1e6
     h.check(perfMs < 120, "perf: 1200 traces < 120ms (got \(perfMs)ms)")
 
+    // Task 15: 假 IBM 真 IEEE 自动校正
+    // 二进制头声明 format=1(IBM)，但道内数据实为 IEEE32（小振幅 0..9.9e-3）
+    let fake = tmpDir + "segy_fake_ibm.sgy"
+    var d = [UInt8](repeating: 0, count: 3600)
+    d[3216] = 0x07; d[3217] = 0xD0; d[3220] = 0x00; d[3221] = 0x64  // ns=100
+    d[3224] = 0x00; d[3225] = 0x01                                    // 声明 IBM
+    for t in 0..<2 {
+        var tr = [UInt8](repeating: 0, count: 240 + 100 * 4)
+        tr[114] = 0x00; tr[115] = 0x64
+        for s in 0..<100 {
+            let amp: Float = (s == 0) ? 0 : Float(s) * 1e-4               // 小振幅，IBM 误读为 <1e-6
+            let v = amp.bitPattern.bigEndian
+            withUnsafeBytes(of: v) { for (i, b) in $0.enumerated() { tr[240 + s*4 + i] = b } }
+        }
+        d += tr
+    }
+    try! Data(d).write(to: URL(fileURLWithPath: fake))
+    let ff = try! SegyFile.open(url: URL(fileURLWithPath: fake))
+    h.check(ff.formatWasCorrected, "fake IBM detected")
+    h.check(ff.geometry.format == .ieee32, "fake IBM corrected to ieee32")
+    let fdata = TraceReader(file: ff, maxThreads: 1).readDecoded(traceRange: 0..<1, sampleRange: 0..<3)
+    h.checkClose(fdata[0], 0, 1e-6, "fake corrected value0")
+    h.checkClose(fdata[1], 1e-4, 1e-6, "fake corrected value1")
+
     h.finish()
 }
 runAll()
