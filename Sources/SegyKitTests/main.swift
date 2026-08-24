@@ -30,8 +30,8 @@ func runAll() {
     bh[16] = 0x07; bh[17] = 0xD0                      // 3217-3218 → raw[16..17] dt=2000
     bh[20] = 0x0F; bh[21] = 0xA0                      // 3221-3222 → raw[20..21] ns=4000
     bh[24] = 0x00; bh[25] = 0x01                      // 3225-3226 → raw[24..25] format=1
-    bh[102] = 0x01                                    // 3503-3504 定长标志
-    bh[104] = 0x00; bh[105] = 0x02                    // 3505-3506 扩展头=2
+    bh[302] = 0x01                                    // 3503-3504 定长标志
+    bh[304] = 0x00; bh[305] = 0x02                    // 3505-3506 扩展头=2
     let parsed = SegyFile.parseBinaryHeader(bh)
     h.check(parsed.ns == 4000, "bh ns"); h.check(parsed.dtMicros == 2000, "bh dt")
     h.check(parsed.formatCode == 1, "bh format"); h.check(parsed.extTextHeaders == 2, "bh ext text")
