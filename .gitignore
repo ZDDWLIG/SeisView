@@ -3,3 +3,4 @@ dist/
 .superpowers/
 .DS_Store
 *.o
+Resources/SeisView.iconset/
