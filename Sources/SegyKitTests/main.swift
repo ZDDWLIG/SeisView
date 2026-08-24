@@ -1,3 +1,4 @@
+import Foundation
 import SegyKit
 
 @MainActor
@@ -50,6 +51,46 @@ func runAll() {
         Decoder.decode(bytes: $0.baseAddress!, count: 4, format: .ibm32, order: .big, into: &out)
     }
     h.checkClose(out[0], 1.0, 1e-5, "dec ibm 1"); h.checkClose(out[3], -1.0, 1e-5, "dec ibm -1")
+
+    // 合成一个合法文件：3600 文本头 + 3 道 (ns=100, IBM)
+    func writeSegy(_ path: String, ns: Int, formatCode: Int, traces: Int, extText: Int = 0) {
+        var d = [UInt8](repeating: 0, count: 3600 + extText * 3200)
+        d[3216] = 0x07; d[3217] = 0xD0          // dt=2000
+        let nsB = UInt16(ns)
+        d[3220] = UInt8(nsB >> 8); d[3221] = UInt8(nsB & 0xFF)
+        d[3224] = UInt8(formatCode >> 8); d[3225] = UInt8(formatCode & 0xFF)
+        d[3502] = 0x00; d[3503] = 0x01          // 3503-3504 定长标志
+        d[3504] = UInt8(extText >> 8); d[3505] = UInt8(extText & 0xFF)
+        for t in 0..<traces {
+            var tr = [UInt8](repeating: 0, count: 240 + ns * 4)
+            let seq = UInt32(t + 1).bigEndian
+            withUnsafeBytes(of: seq) { for (i, b) in $0.enumerated() { tr[i] = b } }   // 1-4 道序号
+            tr[8] = 0x00; tr[9] = 0x00; tr[10] = 0x00; tr[11] = 0x2A                  // 9-12 FFID=42
+            tr[114] = UInt8(ns >> 8); tr[115] = UInt8(ns & 0xFF)                       // 115-116 ns
+            d += tr
+        }
+        try! Data(d).write(to: URL(fileURLWithPath: path))
+    }
+    let tmpDir = NSTemporaryDirectory()
+    let good = tmpDir + "segy_good.sgy"
+    writeSegy(good, ns: 100, formatCode: 1, traces: 3)
+    let f = try! SegyFile.open(url: URL(fileURLWithPath: good))
+    h.check(f.geometry.ns == 100, "open ns")
+    h.check(f.geometry.nTraces == 3, "open nTraces")
+    h.check(f.geometry.firstTraceOffset == 3600, "open firstTraceOffset")
+    h.check(f.geometry.traceBytes == 240 + 100 * 4, "open traceBytes")
+    h.check(f.geometry.format == .ibm32, "open format")
+    h.check(f.geometry.dtMicros == 2000, "open dt")
+
+    let bad = tmpDir + "segy_bad.sgy"
+    writeSegy(bad, ns: 100, formatCode: 1, traces: 2)
+    // 尾部追加半个道长，制造"除不尽"（同一句柄 seek 到末尾再写，才是真正的追加）
+    let fh = try! FileHandle(forUpdatingAtPath: bad)!
+    try! fh.seekToEndOfFile()
+    try! fh.write(Data([UInt8](repeating: 0, count: 50)))
+    var threw = false
+    do { _ = try SegyFile.open(url: URL(fileURLWithPath: bad)) } catch { threw = true }
+    h.check(threw, "variable-length detected")
 
     h.finish()
 }

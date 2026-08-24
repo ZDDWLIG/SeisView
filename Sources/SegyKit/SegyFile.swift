@@ -1,19 +1,102 @@
-// Minimal static stub for Task 3 tests. Task 4 will build out the full SegyFile.
-public enum SegyFile {
-    // 400-byte binary header, big-endian per SEG-Y rev 1.
-    // Raw offset = 1-indexed file byte − 3201 (binary header starts at file byte 3201).
-    // e.g. rev bytes 3501-3502 → raw[300..301].
-    public static func parseBinaryHeader(_ bytes: [UInt8]) -> BinaryHeader {
-        bytes.withUnsafeBytes { raw in
-            let p = raw.baseAddress!
-            return BinaryHeader(
-                ns: Int(ByteOrderReader.u16(p + 20, .big)),
-                dtMicros: Int(ByteOrderReader.u16(p + 16, .big)),
-                formatCode: Int(ByteOrderReader.u16(p + 24, .big)),
-                segyRevision: Int(raw[300]) << 8 | Int(raw[301]),
-                fixedLengthFlag: Int(raw[302]) << 8 | Int(raw[303]),
-                extTextHeaders: Int(raw[304]) << 8 | Int(raw[305])
-            )
+import Foundation
+
+public enum SegyError: Error, CustomStringConvertible {
+    case fileTooSmall
+    case invalidFormatCode(Int)
+    case nonIntegerTraceCount(fileSize: UInt64, traceBytes: Int, remainder: UInt64)
+    case badSampleCount(binaryHeader: Int, traceHeader: Int)
+    public var description: String {
+        switch self {
+        case .fileTooSmall: return "文件小于 3600 字节，不是合法 SEG-Y"
+        case .invalidFormatCode(let c): return "不支持的格式码 \(c)"
+        case .nonIntegerTraceCount(let s, let t, let r):
+            return "道长不一致：文件 \(s) 字节 / 道长 \(t) 余 \(r)，疑似变长道"
+        case .badSampleCount(let b, let t):
+            return "采样点数不一致：二进制头 \(b) vs 道头 \(t)"
+        }
+    }
+}
+
+public final class SegyFile {
+    public let url: URL
+    public let geometry: Geometry
+    public let binaryHeader: BinaryHeader
+    public let fileSize: UInt64
+    public init(url: URL, geometry: Geometry, binaryHeader: BinaryHeader, fileSize: UInt64) {
+        self.url = url; self.geometry = geometry; self.binaryHeader = binaryHeader; self.fileSize = fileSize
+    }
+
+    public static func parseBinaryHeader(_ raw: [UInt8]) -> BinaryHeader {
+        let dt = Int(UInt16(raw[16]) << 8 | UInt16(raw[17]))
+        let ns = Int(UInt16(raw[20]) << 8 | UInt16(raw[21]))
+        // 注意：格式码用 UInt16 读入，保留高字节（rev2 小端标志位于 0x8000 位）
+        let fmt = Int(UInt16(raw[24]) << 8 | UInt16(raw[25]))
+        let rev = Int(UInt16(raw[300]) << 8 | UInt16(raw[301]))
+        let fixed = Int(UInt16(raw[302]) << 8 | UInt16(raw[303]))
+        let ext = Int(UInt16(raw[304]) << 8 | UInt16(raw[305]))
+        return BinaryHeader(ns: ns, dtMicros: dt, formatCode: fmt,
+                            segyRevision: rev, fixedLengthFlag: fixed, extTextHeaders: ext)
+    }
+
+    public static func parseTraceHeader(_ p: UnsafeRawPointer, order: ByteOrder) -> TraceHeader {
+        let ffid = Int(ByteOrderReader.u32(p + 8, order))
+        let seq = Int(ByteOrderReader.u32(p + 0, order))
+        let cdp = Int(ByteOrderReader.u32(p + 20, order))
+        let off = Int(ByteOrderReader.u32(p + 36, order))
+        let ns = Int(ByteOrderReader.u16(p + 114, order))
+        let dt = Int(ByteOrderReader.u16(p + 116, order))
+        return TraceHeader(ffid: ffid, traceSeq: seq, cdp: cdp, offset: off, ns: ns, dtMicros: dt)
+    }
+
+    public static func open(url: URL) throws -> SegyFile {
+        let attrs = try? FileManager.default.attributesOfItem(atPath: url.path)
+        // NSNumber bridging: read the true file size; a wrong (0/nil) size would
+        // wrongly report a too-small file for any real SEG-Y.
+        let size = (attrs?[.size] as? NSNumber)?.uint64Value ?? 0
+        guard size >= 3600 else { throw SegyError.fileTooSmall }
+        let fd = Darwin.open(url.path, O_RDONLY)
+        defer { close(fd) }
+        var bin = [UInt8](repeating: 0, count: 400)
+        _ = bin.withUnsafeMutableBytes { pread(fd, $0.baseAddress, 400, 3200) }
+        let bh = parseBinaryHeader(bin)
+
+        // 格式码校验 + 小端回退
+        var order: ByteOrder = .big
+        guard let format = sampleFormat(for: bh.formatCode, order: &order) else {
+            throw SegyError.invalidFormatCode(bh.formatCode)
+        }
+
+        let extOffset = UInt64(3600 + bh.extTextHeaders * 3200)
+        // 读第一道道头交叉校验 ns
+        var thRaw = [UInt8](repeating: 0, count: 240)
+        _ = thRaw.withUnsafeMutableBytes { pread(fd, $0.baseAddress, 240, off_t(extOffset)) }
+        let th = parseTraceHeader(thRaw, order: order)
+
+        var ns = bh.ns
+        if ns <= 0 { ns = th.ns }                       // 二进制头 ns 非法则回退道头
+        else if th.ns > 0 && th.ns != ns { ns = th.ns } // 不一致以道头为准
+        guard ns > 0 else { throw SegyError.badSampleCount(binaryHeader: bh.ns, traceHeader: th.ns) }
+
+        let traceBytes = 240 + ns * format.bytesPerSample
+        let dataBytes = size - extOffset
+        guard dataBytes % UInt64(traceBytes) == 0 else {
+            throw SegyError.nonIntegerTraceCount(fileSize: size, traceBytes: traceBytes, remainder: dataBytes % UInt64(traceBytes))
+        }
+        let nTraces = Int(dataBytes / UInt64(traceBytes))
+
+        let geo = Geometry(ns: ns, dtMicros: bh.dtMicros, format: format, byteOrder: order,
+                           firstTraceOffset: extOffset, traceBytes: traceBytes, nTraces: nTraces)
+        return SegyFile(url: url, geometry: geo, binaryHeader: bh, fileSize: size)
+    }
+
+    public static func sampleFormat(for code: Int, order: inout ByteOrder) -> SampleFormat? {
+        // 格式码按有符号 16 位读入；SEG-Y rev2 的格式码高字节可带 0x80 表示小端
+        let c = code & 0xFFFF
+        if c & 0x8000 != 0 { order = .little }
+        switch c & 0xFF {
+        case 1: return .ibm32; case 2: return .int32; case 3: return .int16
+        case 5: return .ieee32; case 8: return .int8
+        default: return nil
         }
     }
 }
