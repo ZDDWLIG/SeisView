@@ -148,6 +148,29 @@ func runAll() {
     let cgData = img.dataProvider!.data! as Data
     h.check(cgData[0] > 128, "grayscale white for positive")
 
+    // Task 9: ShotIndex 炮索引（抽样 + 二分）
+    // 120 道，前 60 道 FFID=100，后 60 道 FFID=200
+    func writeMultiShot(_ path: String) {
+        var d = [UInt8](repeating: 0, count: 3600)
+        d[3216] = 0x07; d[3217] = 0xD0; d[3220] = 0x00; d[3221] = 0x64  // ns=100
+        d[3224] = 0x00; d[3225] = 0x01
+        for t in 0..<120 {
+            var tr = [UInt8](repeating: 0, count: 240 + 100 * 4)
+            let ffid: UInt32 = t < 60 ? 100 : 200
+            withUnsafeBytes(of: ffid.bigEndian) { for (i, b) in $0.enumerated() { tr[8 + i] = b } }
+            tr[114] = 0x00; tr[115] = 0x64
+            d += tr
+        }
+        try! Data(d).write(to: URL(fileURLWithPath: path))
+    }
+    let ms = tmpDir + "segy_multishot.sgy"
+    writeMultiShot(ms)
+    let mf = try! SegyFile.open(url: URL(fileURLWithPath: ms))
+    let shots = ShotIndex.build(reader: TraceReader(file: mf), nTraces: mf.geometry.nTraces)
+    h.check(shots.count == 2, "shot count")
+    h.check(shots[0] == Shot(ffid: 100, firstTrace: 0, count: 60), "shot 1")
+    h.check(shots[1] == Shot(ffid: 200, firstTrace: 60, count: 60), "shot 2")
+
     h.finish()
 }
 runAll()
