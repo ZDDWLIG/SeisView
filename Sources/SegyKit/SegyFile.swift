@@ -67,6 +67,9 @@ public final class SegyFile {
         }
 
         let extOffset = UInt64(3600 + bh.extTextHeaders * 3200)
+        // 畸形头可能声称大量扩展文本头，extOffset 超过实际文件大小；
+        // 不拦截则下方 size - extOffset 会在 UInt64 下回绕成巨大值
+        guard size >= extOffset else { throw SegyError.fileTooSmall }
         // 读第一道道头交叉校验 ns
         var thRaw = [UInt8](repeating: 0, count: 240)
         _ = thRaw.withUnsafeMutableBytes { pread(fd, $0.baseAddress, 240, off_t(extOffset)) }

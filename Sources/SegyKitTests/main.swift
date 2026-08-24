@@ -92,6 +92,20 @@ func runAll() {
     do { _ = try SegyFile.open(url: URL(fileURLWithPath: bad)) } catch { threw = true }
     h.check(threw, "variable-length detected")
 
+    // 畸形文件：二进制头声称有 1 个扩展文本头（extOffset=6800），但文件只有 3600 字节
+    // 若 extOffset > size 未校验，size - extOffset 会在 UInt64 下回绕成巨大值
+    let under = tmpDir + "segy_under.sgy"
+    var u = [UInt8](repeating: 0, count: 3600)          // 3200 文本头 + 400 二进制头，无扩展头、无道
+    u[3224] = 0x00; u[3225] = 0x01                      // format=1 (ibm32)，让 sampleFormat 通过
+    u[3504] = 0x00; u[3505] = 0x01                      // extTextHeaders=1 → extOffset=6800 > 3600
+    try! Data(u).write(to: URL(fileURLWithPath: under))
+    var underThrew = false
+    do { _ = try SegyFile.open(url: URL(fileURLWithPath: under)) } catch let e {
+        // 必须命中 extOffset 保护（.fileTooSmall），而非后续的 badSampleCount/其他错误
+        if case SegyError.fileTooSmall = e { underThrew = true }
+    }
+    h.check(underThrew, "extOffset underflow guarded")
+
     h.finish()
 }
 runAll()
