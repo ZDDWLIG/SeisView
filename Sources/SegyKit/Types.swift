@@ -1,6 +1,6 @@
 public enum ByteOrder: Sendable { case big, little }
 
-public enum SampleFormat: Sendable {
+public enum SampleFormat: Sendable, Equatable {
     case ibm32, int32, int16, ieee32, int8
     public var bytesPerSample: Int {
         switch self { case .ibm32, .int32, .ieee32: return 4

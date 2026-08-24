@@ -6,6 +6,8 @@ struct SectionView: NSViewRepresentable {
     let model: DocumentModel
     let cursor: CursorStore
     let image: CGImage?
+    /// 该 pane 对应文件的总道数（光标坐标换算用）。对比模式下各 pane 可不同。
+    let totalTraces: Int
 
     func makeNSView(context: Context) -> SectionNSView {
         let v = SectionNSView()
@@ -29,7 +31,7 @@ struct SectionView: NSViewRepresentable {
         v.imageScaling = .scaleAxesIndependently
         v.firstTrace = model.viewport.firstTrace
         v.imageWidth = image?.width ?? 0
-        v.totalTraces = model.file?.geometry.nTraces ?? 0
+        v.totalTraces = totalTraces
         v.refreshCursorIfInside()   // 平移后光标下的绝对道号已变化，就地重算
     }
 }

@@ -11,9 +11,19 @@ final class CursorStore: ObservableObject {
     func setTrace(_ t: Int?) { trace = t }
 }
 
+/// 显示模式：单文件 / 并排对比 / 叠加对比。
+enum CompareMode: Hashable {
+    case single
+    case sideBySide
+    case overlay
+}
+
 @MainActor
 final class DocumentModel: ObservableObject {
     @Published var file: SegyFile?
+    /// 对比模式下的全部文件；单文件模式为 [file]。
+    @Published var files: [SegyFile] = []
+    @Published var compareMode: CompareMode = .single
     @Published var viewport = Viewport()
     @Published var errorText: String?
     /// 炮索引（FFID → 首道 + 道数）。为空表示尚未构建或构建失败。
@@ -36,6 +46,8 @@ final class DocumentModel: ObservableObject {
         do {
             let f = try SegyFile.open(url: url)
             file = f
+            files = [f]
+            compareMode = .single
             viewport = Viewport()
             cursor.setTrace(nil)
             selectedTrace = 0
@@ -46,6 +58,35 @@ final class DocumentModel: ObservableObject {
             errorText = nil
             buildShots()
         } catch { errorText = String(describing: error) }
+    }
+
+    /// 打开 2+ 个文件进入对比模式：恰好两个默认叠加，更多则并排。
+    /// 任一文件打开失败则整体放弃并提示，保持当前状态不变。
+    func openCompare(_ urls: [URL]) {
+        guard urls.count >= 2 else {
+            errorText = "对比至少需要两个文件"
+            return
+        }
+        var opened: [SegyFile] = []
+        for url in urls {
+            do { opened.append(try SegyFile.open(url: url)) }
+            catch {
+                errorText = "打开失败 \(url.lastPathComponent)：\(error)"
+                return
+            }
+        }
+        file = opened.first
+        files = opened
+        compareMode = opened.count == 2 ? .overlay : .sideBySide
+        viewport = Viewport()
+        cursor.setTrace(nil)
+        selectedTrace = 0
+        selectedHeader = nil
+        shots = []
+        shotsReady = false
+        currentShotIndex = 0
+        errorText = nil
+        buildShots()
     }
 
     /// 沿道号平移视口。整体重新赋值 viewport，保证 @Published 发出 objectWillChange。
@@ -66,13 +107,19 @@ final class DocumentModel: ObservableObject {
 
     func render() -> CGImage? {
         guard let f = file else { return nil }
-        let n = f.geometry.nTraces
+        return render(file: f, viewport: viewport)
+    }
+
+    /// 渲染单个文件的剖面图，供单文件与多文件对比（并排/叠加）共用。
+    /// 所有 pane 共享同一个 viewport，从而保证联动缩放/平移。
+    func render(file: SegyFile, viewport: Viewport) -> CGImage? {
+        let n = file.geometry.nTraces
         let span = min(max(1, viewport.traceSpan), n)
         let lo = min(max(0, viewport.firstTrace), max(0, n - span))
-        let r = TraceReader(file: f, maxThreads: 8)
+        let r = TraceReader(file: file, maxThreads: 8)
         let data = r.readDecoded(traceRange: lo..<(lo + span), sampleRange: nil)
         let h = 800
-        let b = Decimator.minMax(data, ns: f.geometry.ns, nTraces: span, h: h)
+        let b = Decimator.minMax(data, ns: file.geometry.ns, nTraces: span, h: h)
         let g = Gain.apply(b, viewport.gain)
         return Rasterizer.makeImage(g, palette: viewport.palette)
     }

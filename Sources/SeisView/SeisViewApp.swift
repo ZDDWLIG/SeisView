@@ -18,6 +18,15 @@ struct SeisViewApp: App {
                                                  UTType(filenameExtension: "segy")!]
                     if panel.runModal() == .OK, let url = panel.url { model.open(url) }
                 }.keyboardShortcut("o")
+                Button("对比…") {
+                    let panel = NSOpenPanel()
+                    panel.allowedContentTypes = [UTType(filenameExtension: "sgy")!,
+                                                 UTType(filenameExtension: "segy")!]
+                    panel.allowsMultipleSelection = true
+                    if panel.runModal() == .OK, panel.urls.count >= 2 {
+                        model.openCompare(panel.urls)
+                    }
+                }.keyboardShortcut("o", modifiers: [.command, .shift])
             }
             CommandMenu("导航") {
                 Button("上一炮") { model.goToPreviousShot() }
@@ -35,9 +44,18 @@ struct ContentView: View {
         VStack(spacing: 0) {
             if let e = model.errorText {
                 Text(e).foregroundColor(.red).padding()
+            } else if model.compareMode != .single, model.files.count >= 2 {
+                HStack(spacing: 0) {
+                    CompareLayout(model: model)
+                    Divider()
+                    HeaderInspector(model: model)
+                        .frame(width: 230)
+                }
+                StatusBar(model: model, nTraces: model.files[0].geometry.nTraces)
             } else if let f = model.file {
                 HStack(spacing: 0) {
-                    SectionView(model: model, cursor: model.cursor, image: model.render())
+                    SectionView(model: model, cursor: model.cursor, image: model.render(),
+                                totalTraces: f.geometry.nTraces)
                     Divider()
                     HeaderInspector(model: model)
                         .frame(width: 230)
@@ -50,6 +68,14 @@ struct ContentView: View {
         }
         .toolbar {
             ToolbarItemGroup {
+                if model.compareMode != .single {
+                    Picker("对比方式", selection: $model.compareMode) {
+                        Text("并排").tag(CompareMode.sideBySide)
+                        Text("叠加").tag(CompareMode.overlay)
+                    }
+                    .pickerStyle(.segmented)
+                    .help("对比显示方式")
+                }
                 Button { model.goToPreviousShot() } label: {
                     Label("上一炮", systemImage: "chevron.left")
                 }
