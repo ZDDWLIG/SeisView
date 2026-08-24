@@ -131,6 +131,15 @@ func runAll() {
     // 道 3 的 bin0 = min(24,27)=24 max=27
     h.check(b.mn[3 * 2 + 0] == 24 && b.mx[3 * 2 + 0] == 27, "bin minmax trace3")
 
+    // Task 7: Gain 标定
+    var b0 = Binned(w: 1, h: 1, mn: [-10], mx: [10])
+    let g0 = Gain.apply(b0, .percentiles(0.005, 0.995))
+    h.check(g0.mn[0] > -10 && g0.mn[0] < 0, "percentile clip low")
+    h.check(g0.mx[0] > 0 && g0.mx[0] < 10, "percentile clip high")
+    var bz = Binned(w: 2, h: 2, mn: [0,0,0,0], mx: [0,0,0,0])
+    let gz = Gain.apply(bz, .maxAbs)
+    h.check(gz.mn.allSatisfy { $0.isFinite } && gz.mx.allSatisfy { $0.isFinite }, "zero no NaN")
+
     h.finish()
 }
 runAll()
