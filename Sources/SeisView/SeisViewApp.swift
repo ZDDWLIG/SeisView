@@ -1,6 +1,5 @@
 import SwiftUI
 import AppKit
-import UniformTypeIdentifiers
 import SegyKit
 
 @main
@@ -15,14 +14,10 @@ struct SeisViewApp: App {
             CommandGroup(replacing: .newItem) {
                 Button("打开 SEG-Y…") {
                     let panel = NSOpenPanel()
-                    panel.allowedContentTypes = [UTType(filenameExtension: "sgy")!,
-                                                 UTType(filenameExtension: "segy")!]
                     if panel.runModal() == .OK, let url = panel.url { model.open(url) }
                 }.keyboardShortcut("o")
                 Button("对比…") {
                     let panel = NSOpenPanel()
-                    panel.allowedContentTypes = [UTType(filenameExtension: "sgy")!,
-                                                 UTType(filenameExtension: "segy")!]
                     panel.allowsMultipleSelection = true
                     if panel.runModal() == .OK, panel.urls.count >= 2 {
                         model.openCompare(panel.urls)
