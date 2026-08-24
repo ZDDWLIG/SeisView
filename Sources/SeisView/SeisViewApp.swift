@@ -50,7 +50,7 @@ struct ContentView: View {
                 StatusBar(model: model, nTraces: model.files[0].geometry.nTraces)
             } else if let f = model.file {
                 HStack(spacing: 0) {
-                    SectionView(model: model, cursor: model.cursor, image: model.render(),
+                    SectionView(model: model, cursor: model.cursor, image: model.renderedImage,
                                 totalTraces: f.geometry.nTraces)
                     Divider()
                     HeaderInspector(model: model)
