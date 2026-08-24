@@ -1,111 +1,154 @@
-# SeisView — macOS SEG-Y 地震数据查看器
+# SeisView — macOS SEG-Y Seismic Data Viewer
 
-对标 Windows 的 SeiSee，核心是超大 SEG-Y 文件（10 GB 级、数十万道）的高效显示。原生 Swift，零第三方依赖。
+A native macOS viewer for SEG-Y / SGY seismic data, built for **instant display of very large files** (10 GB+, hundreds of thousands of traces). Written in pure Swift with zero third-party dependencies. Inspired by SeiSee on Windows.
 
-## 功能
+Opening a 9.5 GB, 589,248-trace file renders immediately — no full-file scan, no pre-conversion.
 
-- 变密度剖面显示（灰度 + seismic 蓝白红调色板）
-- 横向平移、纵向缩放、增益（百分位 / AGC / 每道 / 最大幅值）
-- 道头检查器（FFID / 道序 / CDP / 偏移距 / 采样数等，含字节位置）
-- 按炮（FFID）导航
-- 多文件对比：并排 + 叠加（如去噪前后、input + mask）
-- 假 IBM 真 IEEE 自动校正
+## Installation
 
-## 为什么快
+**Requirements:** macOS 13 (Ventura) or later. Universal binary — runs natively on both Apple Silicon and Intel Macs.
 
-快的根本原因不是算得快，而是**几乎什么都不读**：
+1. **Download** `SeisView-0.1.0.dmg` from the [latest release](https://github.com/ZDDWLIG/SeisView/releases/latest).
+   (A `.zip` is also provided if you prefer it over the disk image.)
 
-- **O(1) 随机寻址** —— SEG-Y 定长记录布局下第 i 道偏移可直接算出，打开 10 GB 文件只需读 3600 字节头部，道数由文件大小推算，不做全文件扫描
-- **只读视口内的道** —— 屏幕宽 1200 px 就最多取 1200 道，与文件总道数无关
-- **并行 pread** —— 每线程独立 fd，`pread` 无状态天生线程安全，8 线程近线性加速
-- **缩放交给系统** —— 8 位索引位图 + 调色板 LUT，缩放走纹理采样不重算数据
+2. **Install** — open the `.dmg` and drag `SeisView.app` into your `Applications` folder.
 
-实测（Apple M5 / 16 GB，9.57 GB 文件、589,248 道、ns=4000、IBM 格式，`F_NOCACHE` 强制冷读）：
+3. **First launch** — macOS Gatekeeper will block the app with a message like *"SeisView.app cannot be opened because the developer cannot be verified."* This is expected: the app is ad-hoc signed but not notarized by Apple (notarization requires a paid Developer ID). To open it:
 
-| 场景 | 耗时 |
+   **Right-click** (or Control-click) `SeisView.app` → choose **Open** → click **Open** again in the dialog.
+
+   You only need to do this once. Afterwards the app opens normally with a double-click.
+
+   Alternatively, remove the quarantine flag from Terminal:
+
+   ```bash
+   xattr -d com.apple.quarantine /Applications/SeisView.app
+   ```
+
+4. **Open a file** — use `File → Open` (`⌘O`) and select any `.sgy` / `.segy` file. Custom extensions are accepted too.
+
+> **Note on notarization:** to remove the first-launch prompt entirely, an Apple Developer account ($99/year) is required. With one, replace `codesign --sign -` in `scripts/release.sh` with a Developer ID signature and add `notarytool submit` + `stapler staple`.
+
+## Features
+
+- Variable-density section display (grayscale + seismic blue-white-red palettes)
+- Horizontal panning, vertical zoom, gain control (percentile / AGC / per-trace / max-amplitude)
+- Trace header inspector (FFID, trace sequence, CDP, offset, sample count, etc., with byte positions)
+- Shot-based navigation by FFID
+- Multi-file comparison: side-by-side and overlay (e.g. before/after denoising, input + mask)
+- Automatic correction of files that declare IBM float but actually store IEEE
+
+## Usage
+
+- Two-finger scroll to pan, pinch to zoom, drag to pan
+- `⌘←` / `⌘→` — previous / next shot
+- Enter a trace number or FFID in the jump box to navigate directly
+- Click any trace to inspect its full 240-byte header in the sidebar
+
+## Why It's Fast
+
+The speed does not come from computing quickly — it comes from **reading almost nothing**:
+
+- **O(1) random access** — SEG-Y's fixed-length record layout means the byte offset of trace *i* is computed directly. Opening a 10 GB file reads only the 3600-byte header; the trace count is derived from the file size. No full-file scan.
+- **Only viewport traces are read** — a 1200 px wide window reads at most 1200 traces, regardless of how many the file contains.
+- **Parallel `pread`** — each worker thread holds its own file descriptor. `pread` is stateless and inherently thread-safe, which is why 8 threads scale near-linearly.
+- **Zooming is delegated to the system** — an 8-bit indexed bitmap plus a palette LUT; zoom goes through texture sampling rather than recomputing data.
+
+Measured on Apple M5 / 16 GB with a 9.57 GB file (589,248 traces, ns=4000, IBM format), using `F_NOCACHE` to force honest cold reads:
+
+| Scenario | Time |
 |---|---|
-| 1 线程冷读一屏 | 116.7 ms |
-| 8 线程冷读一屏 | **21.6 ms** |
-| 8 线程页缓存命中 | **2.5 ms** |
-| 纯 IBM 解码（200 万采样） | 1.2 ms（≈1.6 GB/s） |
+| 1 thread, cold read of one screen | 116.7 ms |
+| 8 threads, cold read of one screen | **21.6 ms** |
+| 8 threads, page cache hit | **2.5 ms** |
+| IBM decode alone (2M samples) | 1.2 ms (≈1.6 GB/s) |
 
-解码耗时占比不足 2%，瓶颈完全在 I/O —— 所以不需要预转换文件，也不需要 GPU 解码。
+Decoding accounts for under 2% of the time — the bottleneck is entirely I/O. That is why no file pre-conversion and no GPU decoding are needed.
 
-炮索引另有优化：朴素线性扫描 589,248 个道头需约 57 秒，改用跳跃抽样 + 边界二分后读取次数降约 30 倍，8 线程下 < 1 秒，结果按 `路径+大小+mtime` 落盘缓存。
+Shot indexing is optimized separately: naively scanning 589,248 trace headers takes about 57 seconds. Using strided sampling plus binary search for shot boundaries cuts the number of reads by roughly 30×, finishing in under a second with 8 threads. Results are cached to disk keyed by path + size + mtime.
 
-**纵向 min/max 分箱是正确性要求，不是性能优化** —— 4000 采样点压入 800 px 时若隔点取样会产生混叠，剖面形态严重失真。
+**Vertical min/max binning is a correctness requirement, not an optimization** — compressing 4000 samples into 800 px by point-sampling would alias badly and severely distort the section's appearance.
 
-## 健壮性
+## Robustness
 
-与 SeiSee 的关键差异：**遇到畸形文件明确报错，绝不静默显示错误图像。**
+The key difference from SeiSee: **malformed files produce a clear error, never a silently wrong image.**
 
-- **变长道** —— 整除校验 + 抽样一致性检查（定长道标志常被写方疏于维护，故不盲信），不一致则报错而非错乱显示
-- **假 IBM 真 IEEE** —— 两种格式各试解一批采样比较分布合理性，自动择优并在状态栏标注「格式已自动校正」
-- **扩展文本头** —— 按字节 3505–3506 修正首道偏移
-- **小端变体** —— 格式码非法时尝试小端解析
-- **手动覆盖** —— 可强制指定 ns / 格式码 / 字节序
+- **Variable-length traces** — validated by exact divisibility of the file size plus sampled consistency checks. The fixed-length-trace flag is often left unmaintained by writers, so it is treated as corroboration only, not truth. On mismatch the file is rejected rather than displayed incorrectly.
+- **IBM declared, IEEE stored** — a batch of samples is decoded both ways and the resulting distributions compared for plausibility. The sane interpretation is chosen automatically and flagged as "format auto-corrected" in the status bar.
+- **Extended textual headers** — the first-trace offset is adjusted per bytes 3505–3506.
+- **Little-endian variants** — if the format code is out of range, little-endian parsing is attempted.
+- **Manual override** — ns, format code, and byte order can all be forced explicitly.
 
-支持的数据样本格式码：1（4 字节 IBM 浮点）、2（4 字节整型）、3（2 字节整型）、5（4 字节 IEEE 浮点）、8（1 字节整型）。
+Supported data sample format codes: 1 (4-byte IBM float), 2 (4-byte integer), 3 (2-byte integer), 5 (4-byte IEEE float), 8 (1-byte integer).
 
-## 架构
+## Architecture
 
-`SegyKit` 零 UI 依赖，可用命令行跑真实文件回归测试，不必靠肉眼验证界面。渲染是 `(SegyFile, Viewport) → Image` 的纯函数，任意一帧可在测试中精确复现。
+`SegyKit` has zero UI dependencies, so regression tests can run against real files from the command line instead of relying on visual inspection. Rendering is a pure function `(SegyFile, Viewport) → Image`, meaning any frame can be reproduced exactly in a test.
 
 ```
-SegyKit（纯核心，可独立测试）
-├── SegyFile      文件打开、头解析、几何推断与校验
-├── TraceReader   并行 pread + 样本解码
-├── ShotIndex     FFID 炮索引构建与磁盘缓存
-├── Decimator     LOD 降采样（min/max 分箱）
-└── Rasterizer    振幅 → 8bit 索引 → 调色板 LUT → CGImage
+SegyKit (pure core, independently testable)
+├── SegyFile      file opening, header parsing, geometry inference and validation
+├── TraceReader   parallel pread + sample decoding
+├── ShotIndex     FFID shot index construction and on-disk caching
+├── Decimator     LOD downsampling (min/max binning)
+└── Rasterizer    amplitude → 8-bit index → palette LUT → CGImage
 
-SeisView.app（AppKit + SwiftUI）
-├── DocumentModel   已开文件集合 + 视口状态
-├── SectionView     剖面绘制
-├── HeaderInspector 道头表格
-└── CompareLayout   并排 / 叠加
+SeisView.app (AppKit + SwiftUI)
+├── DocumentModel   open file set + viewport state
+├── SectionView     section rendering
+├── HeaderInspector trace header table
+└── CompareLayout   side-by-side / overlay
 ```
 
-需要 macOS 13+ 和 Swift 6.0+（Command Line Tools 即可，**不需要完整 Xcode**）。着色器为运行时编译，代价仅启动时数十毫秒。
+## Building from Source
 
-## 开发构建
+Requires macOS 13+ and Swift 6.0+. Command Line Tools are sufficient — **a full Xcode installation is not needed**. Shaders are compiled at runtime, costing only a few tens of milliseconds at startup.
 
 ```bash
-swift run SeisView           # 直接运行
-./scripts/make_app.sh        # 快速打当前架构的 .app
+swift run SeisView           # build and run directly
+./scripts/make_app.sh        # build a .app for the current architecture
 ```
 
-## 发布打包（通用二进制）
+Running the test suite:
 
 ```bash
-./scripts/release.sh [版本号]   # 默认 0.1.0
+swift run SegyKitTests
 ```
 
-产出在 `dist/`：
+The golden-file and performance-regression tests need a large SEG-Y file (ns=4000, 589,248 traces). Point `SEGY_BIG_FILE` at one to enable them; without it, those tests are skipped and the rest still run:
 
-- `SeisView.app` — 通用二进制（Apple Silicon + Intel 都能跑）
-- `SeisView-<版本>.dmg` — 磁盘映像，推荐分发
-- `SeisView-<版本>.zip`
+```bash
+SEGY_BIG_FILE=/path/to/big.segy swift run SegyKitTests
+```
 
-重新生成图标：`swift scripts/make_icon.swift && iconutil -c icns Resources/SeisView.iconset -o Resources/SeisView.icns`
+## Packaging a Release
 
-## 安装（接收方）
+```bash
+./scripts/release.sh [version]   # defaults to 0.1.0
+```
 
-1. 打开 `.dmg`，把 `SeisView.app` 拖进「应用程序」。
-2. **首次打开**：由于未做 Apple 公证（免费构建，无 Developer ID），macOS Gatekeeper 会拦截。右键点击 app →「打开」→ 再点「打开」即可；之后正常双击打开。
+Outputs land in `dist/`:
 
-   或者用命令去除隔离标记：`xattr -d com.apple.quarantine /Applications/SeisView.app`
+- `SeisView.app` — universal binary (Apple Silicon + Intel)
+- `SeisView-<version>.dmg` — disk image, the recommended distribution format
+- `SeisView-<version>.zip`
 
-> 若要彻底免去首次拦截，需 Apple 开发者账号（$99/年）做签名 + 公证。届时在 `scripts/release.sh` 里把 `codesign --sign -` 换成 Developer ID 签名，再加 `notarytool submit` + `stapler staple`。
+To regenerate the app icon:
 
-## 已知限制
+```bash
+swift scripts/make_icon.swift && iconutil -c icns Resources/SeisView.iconset -o Resources/SeisView.icns
+```
 
-- 无 Wiggle 波形显示（仅变密度）
-- 炮索引对「单炮小于 256 道」的文件可能漏边界（目标数据炮道数远大于 256，安全）
-- 无频谱、图片导出、数据写回
+## Known Limitations
 
-## 许可证
+- No wiggle-trace display (variable density only)
+- Shot indexing may miss boundaries in files where a single shot has fewer than 256 traces
+- No spectral analysis, image export, or data write-back (read-only viewer)
+- No 3D volume display or slice browsing
+- macOS only — no Windows or Linux port
+
+## License
 
 [MIT License](LICENSE.md) © 2026 Tianxiang Gao
 
-可自由使用、修改、分发、商用，唯一义务是保留版权声明与许可声明。
+Free to use, modify, distribute, and use commercially. The only obligation is to retain the copyright and license notice.
