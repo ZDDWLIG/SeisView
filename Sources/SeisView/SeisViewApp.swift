@@ -1,6 +1,7 @@
 import SwiftUI
 import AppKit
 import UniformTypeIdentifiers
+import SegyKit
 
 @main
 struct SeisViewApp: App {
@@ -68,6 +69,32 @@ struct ContentView: View {
         }
         .toolbar {
             ToolbarItemGroup {
+                Picker("增益", selection: Binding(
+                    get: { model.viewport.gain },
+                    set: { g in
+                        var v = model.viewport
+                        v.gain = g
+                        model.viewport = v
+                    }
+                )) {
+                    Text("百分位").tag(GainMode.percentiles(0.01, 0.99))
+                    Text("AGC").tag(GainMode.agc(100))
+                    Text("每道").tag(GainMode.perTrace)
+                    Text("最大幅值").tag(GainMode.maxAbs)
+                }
+                .help("增益方式")
+                Picker("调色板", selection: Binding(
+                    get: { model.viewport.palette },
+                    set: { p in
+                        var v = model.viewport
+                        v.palette = p
+                        model.viewport = v
+                    }
+                )) {
+                    Text("灰度").tag(Palette.grayscale)
+                    Text("地震").tag(Palette.seismic)
+                }
+                .help("调色板")
                 if model.compareMode != .single {
                     Picker("对比方式", selection: $model.compareMode) {
                         Text("并排").tag(CompareMode.sideBySide)

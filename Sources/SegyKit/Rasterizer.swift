@@ -1,7 +1,7 @@
 import CoreGraphics
 import Foundation
 
-public enum Palette: Sendable, Equatable { case grayscale, seismic }
+public enum Palette: Sendable, Equatable, Hashable { case grayscale, seismic }
 
 public enum Rasterizer {
     public static func makeImage(_ b: Binned, palette: Palette) -> CGImage {
@@ -15,7 +15,11 @@ public enum Rasterizer {
             }
             let amp = max(abs(colMax), abs(colMin))
             for y in 0..<h {
-                let v = (b.mx[x * h + y] + b.mn[x * h + y]) * 0.5
+                // 取该 bin 的「支配幅度」（|max|≥|min| 取 max，否则取 min），
+                // 保住 Decimator 计算出的 min/max 包络；否则全幅 bin 会被中点抹成灰色。
+                let mxx = b.mx[x * h + y]
+                let mnn = b.mn[x * h + y]
+                let v = abs(mxx) >= abs(mnn) ? mxx : mnn
                 let t = amp > 0 ? (v / amp) * 0.5 + 0.5 : 0.5   // 归一到 [0,1]
                 let (r, g, bl) = color(for: palette, t: t)
                 let i = (y * w + x) * 4

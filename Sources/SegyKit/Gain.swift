@@ -1,6 +1,6 @@
 import Foundation
 
-public enum GainMode: Sendable, Equatable {
+public enum GainMode: Sendable, Equatable, Hashable {
     case percentiles(Float, Float)   // 低/高百分位
     case agc(Int)                    // 滑动窗宽（采样）
     case perTrace                    // 每道 max 归一化
@@ -8,11 +8,32 @@ public enum GainMode: Sendable, Equatable {
 }
 
 public enum Gain {
+    /// O(n) 直方图近似百分位：在 [min,max] 上开 4096 桶，累加计数到 pct 分位所在桶。
+    /// 返回该桶下界（原 nearest-rank 语义，误差 ≤ 1 桶宽），对增益裁剪足够。
     static func percentile(_ arr: [Float], _ pct: Float) -> Float {
         guard !arr.isEmpty else { return 0 }
-        let sorted = arr.sorted()
-        let k = Int((Float(sorted.count - 1) * pct).rounded())
-        return sorted[min(max(k, 0), sorted.count - 1)]
+        var lo = arr[0], hi = arr[0]
+        for v in arr {
+            if v < lo { lo = v }
+            if v > hi { hi = v }
+        }
+        guard hi > lo else { return lo }
+        let buckets = 4096
+        let inv = Double(buckets - 1) / Double(hi - lo)
+        var counts = [Int](repeating: 0, count: buckets)
+        for v in arr {
+            let idx = Int(((Double(v) - Double(lo)) * inv).rounded(.down))
+            counts[min(max(idx, 0), buckets - 1)] += 1
+        }
+        let target = Int((Float(arr.count - 1) * pct).rounded())
+        var acc = 0
+        for i in 0..<buckets {
+            acc += counts[i]
+            if acc > target {
+                return Float(Double(lo) + Double(i) / inv)
+            }
+        }
+        return hi
     }
 
     public static func apply(_ b: Binned, _ mode: GainMode) -> Binned {
@@ -23,8 +44,16 @@ public enum Gain {
             let all = mn + mx
             lo = percentile(all, l); hi = percentile(all, h)
         case .maxAbs:
+            // 训练口径 §7.5：clip[0.5,99.5] 后按 max_abs 归一化，负/正对称。
             let all = mn + mx
             lo = percentile(all, 0.005); hi = percentile(all, 0.995)
+            let scale = max(abs(lo), abs(hi))
+            guard scale > 0 else { return Binned(w: b.w, h: b.h, mn: mn, mx: mx) }
+            for i in 0..<mn.count {
+                mn[i] = max(-1, min(1, mn[i] / scale))
+                mx[i] = max(-1, min(1, mx[i] / scale))
+            }
+            return Binned(w: b.w, h: b.h, mn: mn, mx: mx)
         case .agc(let win):
             // 简化 AGC：每 bin 列在滑动窗内除以其局部 RMS 包络
             let half = win / 2

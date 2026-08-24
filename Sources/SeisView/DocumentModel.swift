@@ -38,6 +38,10 @@ final class DocumentModel: ObservableObject {
     @Published var selectedHeader: TraceHeader?
     let reader: TraceReader? = nil
     let cursor = CursorStore()
+    /// 渲染缓存：最后一次渲染的图像及其 (file.url, viewport) 键。
+    /// viewport 内已含 gain/palette；键不变则直接复用，避免 SwiftUI body 每遍重解码。
+    private var renderKey: (url: URL, viewport: Viewport)?
+    private var renderCache: CGImage?
 
     /// 屏宽上限：任何情况下 traceSpan 都不超过它，绝不一次解码整炮/整文件。
     static let maxTraceSpan = 1200
@@ -56,6 +60,7 @@ final class DocumentModel: ObservableObject {
             shotsReady = false
             currentShotIndex = 0
             errorText = nil
+            renderKey = nil; renderCache = nil
             buildShots()
         } catch { errorText = String(describing: error) }
     }
@@ -86,6 +91,7 @@ final class DocumentModel: ObservableObject {
         shotsReady = false
         currentShotIndex = 0
         errorText = nil
+        renderKey = nil; renderCache = nil
         buildShots()
     }
 
@@ -112,14 +118,41 @@ final class DocumentModel: ObservableObject {
 
     /// 渲染单个文件的剖面图，供单文件与多文件对比（并排/叠加）共用。
     /// 所有 pane 共享同一个 viewport，从而保证联动缩放/平移。
+    /// 键 (file.url, viewport) 未变时直接复用上次渲染结果，避免重复解码。
     func render(file: SegyFile, viewport: Viewport) -> CGImage? {
+        if let key = renderKey, key.url == file.url, key.viewport == viewport {
+            return renderCache
+        }
+        let img = renderDecode(file: file, viewport: viewport)
+        renderKey = (url: file.url, viewport: viewport)
+        renderCache = img
+        return img
+    }
+
+    /// 实际解码 + 分箱 + 增益 + 栅格化。纵向缩放：sampleSpan>0 时只解码该采样窗，
+    /// 并按窗高分箱；sampleSpan==0 维持旧行为（全采样、h=800）。
+    private func renderDecode(file: SegyFile, viewport: Viewport) -> CGImage? {
         let n = file.geometry.nTraces
+        let ns = file.geometry.ns
         let span = min(max(1, viewport.traceSpan), n)
         let lo = min(max(0, viewport.firstTrace), max(0, n - span))
+        let sampleRange: Range<Int>?
+        let decodedNs: Int
+        let h: Int
+        if viewport.sampleSpan > 0 {
+            let ss = min(viewport.sampleSpan, ns)
+            let firstSample = min(max(0, viewport.firstSample), max(0, ns - ss))
+            sampleRange = firstSample..<(firstSample + ss)
+            decodedNs = ss
+            h = ss
+        } else {
+            sampleRange = nil
+            decodedNs = ns
+            h = 800
+        }
         let r = TraceReader(file: file, maxThreads: 8)
-        let data = r.readDecoded(traceRange: lo..<(lo + span), sampleRange: nil)
-        let h = 800
-        let b = Decimator.minMax(data, ns: file.geometry.ns, nTraces: span, h: h)
+        let data = r.readDecoded(traceRange: lo..<(lo + span), sampleRange: sampleRange)
+        let b = Decimator.minMax(data, ns: decodedNs, nTraces: span, h: h)
         let g = Gain.apply(b, viewport.gain)
         return Rasterizer.makeImage(g, palette: viewport.palette)
     }

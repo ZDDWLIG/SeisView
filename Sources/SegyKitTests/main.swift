@@ -140,6 +140,19 @@ func runAll() {
     let gz = Gain.apply(bz, .maxAbs)
     h.check(gz.mn.allSatisfy { $0.isFinite } && gz.mx.allSatisfy { $0.isFinite }, "zero no NaN")
 
+    // Final-review Fix 2: maxAbs 对称归一化（区别于 percentiles 的 min-max 映射）
+    let bm = Binned(w: 1, h: 1, mn: [-10], mx: [10])
+    let gm = Gain.apply(bm, .maxAbs)
+    h.check(gm.mn[0].isFinite && gm.mx[0].isFinite, "maxAbs finite")
+    h.checkClose(gm.mn[0], -1, 1e-3, "maxAbs symmetric mn ≈ -1")
+    h.checkClose(gm.mx[0], 1, 1e-3, "maxAbs symmetric mx ≈ 1")
+    h.check(abs(gm.mn[0]) == abs(gm.mx[0]), "maxAbs symmetric |mn|==|mx|")
+    // 非对称数据：maxAbs 按 max_abs 归一化 → mn∈(-1,0)，而 min-max 映射会给 -1
+    let ba = Binned(w: 1, h: 1, mn: [-10], mx: [30])
+    let ga = Gain.apply(ba, .maxAbs)
+    h.checkClose(ga.mx[0], 1, 1e-3, "maxAbs asym mx ≈ 1")
+    h.check(ga.mn[0] > -1 && ga.mn[0] < 0, "maxAbs asym mn in (-1,0) (got \(ga.mn[0]))")
+
     // Task 8: Rasterizer（灰度 + seismic 调色板）
     let img = Rasterizer.makeImage(Binned(w: 4, h: 3, mn: [0,0,0,0,0,0,0,0,0,0,0,0],
                                           mx: [1,1,1,1,1,1,1,1,1,1,1,1]), palette: .grayscale)
