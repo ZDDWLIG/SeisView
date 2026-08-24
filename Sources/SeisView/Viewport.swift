@@ -3,7 +3,7 @@ import SegyKit
 
 public struct Viewport: Equatable {
     public var firstTrace: Int = 0
-    public var traceSpan: Int = 0     // 0 = 显示全部
+    public var traceSpan: Int = 1200  // 显示的道数（屏宽上限，绝不一次解码全文件）
     public var firstSample: Int = 0
     public var sampleSpan: Int = 0    // 0 = 全部
     public var gain: GainMode = .percentiles(0.01, 0.99)

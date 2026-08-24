@@ -22,8 +22,8 @@ final class DocumentModel: ObservableObject {
     func render() -> CGImage? {
         guard let f = file else { return nil }
         let n = f.geometry.nTraces
-        let span = viewport.traceSpan > 0 ? viewport.traceSpan : n
-        let lo = min(viewport.firstTrace, max(0, n - span))
+        let span = min(max(1, viewport.traceSpan), n)
+        let lo = min(max(0, viewport.firstTrace), max(0, n - span))
         let r = TraceReader(file: f, maxThreads: 8)
         let data = r.readDecoded(traceRange: lo..<(lo + span), sampleRange: nil)
         let h = 800
