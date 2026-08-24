@@ -84,8 +84,8 @@ public final class SegyFile {
         else if th.ns > 0 && th.ns != ns {
             // 二进制头与道头不一致时，以与文件大小吻合的那个 ns 为准；
             // 都吻合（或都不吻合）时以二进制头为准（SEG-Y rev1 权威字段）。
-            // 真实文件（如 big-file）的道头 ns 可能不可靠（本文件道头=1985，
-            // 而二进制头=4000 才与文件大小 该文件大小 整除吻合，segyio 亦报 4000）。
+            // 真实文件的道头 ns 可能不可靠：曾见道头=1985 而二进制头=4000，
+            // 只有 4000 与文件大小整除吻合，segyio 亦报 4000。
             let bytes = format.bytesPerSample
             func consistent(_ v: Int) -> Bool {
                 let tb = UInt64(240 + v * bytes)

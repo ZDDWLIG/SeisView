@@ -200,7 +200,7 @@ final class DocumentModel: ObservableObject {
         currentShotIndex = i
         let shot = shots[i]
         viewport.firstTrace = shot.firstTrace
-        // 大炮（如 big-file 单炮 ~21000 道）绝不整炮解码：traceSpan 夹到屏宽上限。
+        // 大炮（单炮可达 ~21000 道）绝不整炮解码：traceSpan 夹到屏宽上限。
         viewport.traceSpan = min(shot.count, Self.maxTraceSpan)
         selectTrace(shot.firstTrace)
     }

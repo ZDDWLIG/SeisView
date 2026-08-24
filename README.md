@@ -106,12 +106,6 @@ swift run SeisView           # 直接运行
 
 ## 许可证
 
-[PolyForm Noncommercial License 1.0.0](LICENSE.md) —— **仅限非商业用途**。
+[MIT License](LICENSE.md) © 2026 Tianxiang Gao
 
-- ✅ 个人学习、研究、实验、业余项目
-- ✅ 教育机构、公立科研机构、政府机构使用（不论资金来源）
-- ✅ 修改源码、分发副本（须随附本许可证）
-- ❌ 任何商业用途
-- ❌ 再授权（sublicense）或转让许可
-
-注意：这不是 OSI 认可的开源许可证。商业授权请联系版权持有人。
+可自由使用、修改、分发、商用，唯一义务是保留版权声明与许可声明。
