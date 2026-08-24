@@ -25,20 +25,40 @@ public final class TraceReader {
         let bps = format.bytesPerSample
         let step = file.geometry.traceBytes
         let head = Int(file.geometry.firstTraceOffset)
+        let fullTrace = (sampleRange == nil)   // 整道读取时可一次大块读，避免每道一次 pread
         out.withUnsafeMutableBufferPointer { obp in
             let buf = BufferRef(obp)
             DispatchQueue.concurrentPerform(iterations: maxT) { t in
                 let loI = n * t / maxT, hiI = n * (t + 1) / maxT
+                if loI >= hiI { return }
                 let fd = open(path, O_RDONLY)
                 defer { close(fd) }
-                let rawBytes = span * bps
-                var raw = [UInt8](repeating: 0, count: rawBytes)
-                for i in loI..<hiI {
-                    let off = off_t(head + (traceRange.lowerBound + i) * step + 240 + lo * bps)
-                    raw.withUnsafeMutableBytes { _ = pread(fd, $0.baseAddress, rawBytes, off) }
-                    raw.withUnsafeBytes { rb in
-                        Decoder.decode(bytes: rb.baseAddress!, count: span, format: format,
-                                       order: order, into: buf.base + i * span)
+                if fullTrace {
+                    // 一个分区内所有道的完整字节连续，一次 pread 读整块（含 240 道头），再逐道解码。
+                    // 这样向前/向后滚动都退化为单次连续读，消除向后退的回读抖动。
+                    let blockLen = (hiI - loI) * step
+                    var block = [UInt8](repeating: 0, count: blockLen)
+                    let blockStart = off_t(head + (traceRange.lowerBound + loI) * step)
+                    block.withUnsafeMutableBytes { _ = pread(fd, $0.baseAddress, blockLen, blockStart) }
+                    block.withUnsafeBytes { rb in
+                        let base = rb.baseAddress!
+                        for i in loI..<hiI {
+                            let dataPtr = base + (i - loI) * step + 240
+                            Decoder.decode(bytes: dataPtr, count: span, format: format,
+                                           order: order, into: buf.base + i * span)
+                        }
+                    }
+                } else {
+                    // 采样窗（纵向缩放）时各道只取一段，仍按道 pread。
+                    let rawBytes = span * bps
+                    var raw = [UInt8](repeating: 0, count: rawBytes)
+                    for i in loI..<hiI {
+                        let off = off_t(head + (traceRange.lowerBound + i) * step + 240 + lo * bps)
+                        raw.withUnsafeMutableBytes { _ = pread(fd, $0.baseAddress, rawBytes, off) }
+                        raw.withUnsafeBytes { rb in
+                            Decoder.decode(bytes: rb.baseAddress!, count: span, format: format,
+                                           order: order, into: buf.base + i * span)
+                        }
                     }
                 }
             }
