@@ -106,6 +106,19 @@ func runAll() {
     }
     h.check(underThrew, "extOffset underflow guarded")
 
+    // Task 5: 并行 TraceReader
+    let good2 = tmpDir + "segy_read.sgy"
+    writeSegy(good2, ns: 1000, formatCode: 1, traces: 100)
+    let fr = try! SegyFile.open(url: URL(fileURLWithPath: good2))
+    let rdr = TraceReader(file: fr, maxThreads: 4)
+    let data = rdr.readDecoded(traceRange: 0..<100, sampleRange: nil)
+    h.check(data.count == 100 * 1000, "readDecoded count")
+    // 只读时窗
+    let win = rdr.readDecoded(traceRange: 0..<10, sampleRange: 100..<200)
+    h.check(win.count == 10 * 100, "readDecoded sample window count")
+    let hdrs = rdr.readTraceHeaders(range: 0..<100)
+    h.check(hdrs[0].ffid == 42, "readTraceHeaders ffid")
+
     h.finish()
 }
 runAll()
