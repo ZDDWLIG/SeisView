@@ -140,6 +140,14 @@ func runAll() {
     let gz = Gain.apply(bz, .maxAbs)
     h.check(gz.mn.allSatisfy { $0.isFinite } && gz.mx.allSatisfy { $0.isFinite }, "zero no NaN")
 
+    // Task 8: Rasterizer（灰度 + seismic 调色板）
+    let img = Rasterizer.makeImage(Binned(w: 4, h: 3, mn: [0,0,0,0,0,0,0,0,0,0,0,0],
+                                          mx: [1,1,1,1,1,1,1,1,1,1,1,1]), palette: .grayscale)
+    h.check(img.width == 4 && img.height == 3, "raster dims")
+    // 全正 → 灰度应偏白（8bit > 128）
+    let cgData = img.dataProvider!.data! as Data
+    h.check(cgData[0] > 128, "grayscale white for positive")
+
     h.finish()
 }
 runAll()
