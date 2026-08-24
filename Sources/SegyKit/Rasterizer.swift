@@ -1,7 +1,7 @@
 import CoreGraphics
 import Foundation
 
-public enum Palette: Sendable { case grayscale, seismic }
+public enum Palette: Sendable, Equatable { case grayscale, seismic }
 
 public enum Rasterizer {
     public static func makeImage(_ b: Binned, palette: Palette) -> CGImage {

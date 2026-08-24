@@ -1,6 +1,6 @@
 import Foundation
 
-public enum GainMode: Sendable {
+public enum GainMode: Sendable, Equatable {
     case percentiles(Float, Float)   // 低/高百分位
     case agc(Int)                    // 滑动窗宽（采样）
     case perTrace                    // 每道 max 归一化
