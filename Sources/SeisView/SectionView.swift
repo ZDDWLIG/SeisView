@@ -18,6 +18,9 @@ struct SectionView: NSViewRepresentable {
         v.onCursor = { [weak cursor] t in
             MainActor.assumeIsolated { cursor?.setTrace(t) }
         }
+        v.onSelect = { [weak model] t in
+            MainActor.assumeIsolated { model?.selectTrace(t) }
+        }
         return v
     }
 
@@ -38,6 +41,7 @@ final class SectionNSView: NSImageView {
     var onScroll: ((Int) -> Void)?
     var onMagnify: ((Double) -> Void)?
     var onCursor: ((Int?) -> Void)?
+    var onSelect: ((Int) -> Void)?
 
     // 更新于 updateNSView：用于把视图坐标换算成绝对道号。
     var firstTrace: Int = 0
@@ -72,6 +76,13 @@ final class SectionNSView: NSImageView {
         onMagnify?(1.0 + event.magnification)
     }
 
+    override func mouseDown(with event: NSEvent) {
+        // 点击选中光标下的绝对道号，喂给 DocumentModel.selectTrace。
+        if let t = trace(at: convert(event.locationInWindow, from: nil)) {
+            onSelect?(t)
+        }
+    }
+
     override func mouseMoved(with event: NSEvent) {
         reportCursor(at: event.locationInWindow)
     }
@@ -93,11 +104,14 @@ final class SectionNSView: NSImageView {
     }
 
     private func reportCursor(at windowPoint: NSPoint) {
-        let pt = convert(windowPoint, from: nil)
-        guard bounds.width > 0, imageWidth > 0 else { onCursor?(nil); return }
+        onCursor?(trace(at: convert(windowPoint, from: nil)))
+    }
+
+    /// 视图坐标 → 绝对道号（夹到 [0, totalTraces-1]）；视图/图像宽度非法时返回 nil。
+    private func trace(at pt: NSPoint) -> Int? {
+        guard bounds.width > 0, imageWidth > 0 else { return nil }
         let frac = max(0, min(1, pt.x / bounds.width))
         let raw = firstTrace + Int(frac * CGFloat(imageWidth))
-        let clamped = min(max(0, raw), max(0, totalTraces - 1))
-        onCursor?(clamped)
+        return min(max(0, raw), max(0, totalTraces - 1))
     }
 }

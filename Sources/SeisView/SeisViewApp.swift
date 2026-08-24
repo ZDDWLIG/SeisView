@@ -19,6 +19,12 @@ struct SeisViewApp: App {
                     if panel.runModal() == .OK, let url = panel.url { model.open(url) }
                 }.keyboardShortcut("o")
             }
+            CommandMenu("导航") {
+                Button("上一炮") { model.goToPreviousShot() }
+                    .keyboardShortcut(.leftArrow, modifiers: .command)
+                Button("下一炮") { model.goToNextShot() }
+                    .keyboardShortcut(.rightArrow, modifiers: .command)
+            }
         }
     }
 }
@@ -30,11 +36,30 @@ struct ContentView: View {
             if let e = model.errorText {
                 Text(e).foregroundColor(.red).padding()
             } else if let f = model.file {
-                SectionView(model: model, cursor: model.cursor, image: model.render())
+                HStack(spacing: 0) {
+                    SectionView(model: model, cursor: model.cursor, image: model.render())
+                    Divider()
+                    HeaderInspector(model: model)
+                        .frame(width: 230)
+                }
                 StatusBar(model: model, nTraces: f.geometry.nTraces)
             } else {
                 Text("⌘O 打开 SEG-Y 文件").foregroundColor(.secondary)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+        }
+        .toolbar {
+            ToolbarItemGroup {
+                Button { model.goToPreviousShot() } label: {
+                    Label("上一炮", systemImage: "chevron.left")
+                }
+                .help("上一炮")
+                .disabled(model.shots.isEmpty)
+                Button { model.goToNextShot() } label: {
+                    Label("下一炮", systemImage: "chevron.right")
+                }
+                .help("下一炮")
+                .disabled(model.shots.isEmpty)
             }
         }
     }
@@ -62,6 +87,14 @@ struct StatusBar: View {
             Text("traceSpan \(vp.traceSpan)")
             Text("sampleSpan \(vp.sampleSpan)")
             Text("光标道 \(cursor.trace.map(String.init) ?? "—")")
+            if model.shotsReady {
+                Text("炮索引：\(model.shots.count) 炮")
+                if !model.shots.isEmpty {
+                    Text("炮 \(model.currentShotIndex + 1)/\(model.shots.count)")
+                }
+            } else {
+                Text("炮索引：构建中…")
+            }
             Spacer()
         }
         .font(.system(size: 11).monospacedDigit())
