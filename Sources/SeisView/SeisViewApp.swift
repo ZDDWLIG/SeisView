@@ -26,12 +26,49 @@ struct SeisViewApp: App {
 struct ContentView: View {
     @ObservedObject var model: DocumentModel
     var body: some View {
-        VStack {
-            if let e = model.errorText { Text(e).foregroundColor(.red) }
-            else if let f = model.file {
-                SectionView(image: model.render())
-                Text("\(f.geometry.nTraces) 道 × \(f.geometry.ns) 采样")
-            } else { Text("⌘O 打开 SEG-Y 文件").foregroundColor(.secondary) }
+        VStack(spacing: 0) {
+            if let e = model.errorText {
+                Text(e).foregroundColor(.red).padding()
+            } else if let f = model.file {
+                SectionView(model: model, cursor: model.cursor, image: model.render())
+                StatusBar(model: model, nTraces: f.geometry.nTraces)
+            } else {
+                Text("⌘O 打开 SEG-Y 文件").foregroundColor(.secondary)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
         }
+    }
+}
+
+/// 底部状态栏：视口位置 / 跨度 / 采样跨度 / 光标道号。
+struct StatusBar: View {
+    @ObservedObject var model: DocumentModel
+    @ObservedObject var cursor: CursorStore
+    let nTraces: Int
+
+    init(model: DocumentModel, nTraces: Int) {
+        self.model = model
+        self.cursor = model.cursor
+        self.nTraces = nTraces
+    }
+
+    var body: some View {
+        let vp = model.viewport
+        let first = vp.firstTrace
+        let last = min(first + vp.traceSpan, nTraces) - 1
+        HStack(spacing: 16) {
+            Text("道 \(first + 1)–\(last + 1) / \(nTraces)")
+            Text("firstTrace \(first)")
+            Text("traceSpan \(vp.traceSpan)")
+            Text("sampleSpan \(vp.sampleSpan)")
+            Text("光标道 \(cursor.trace.map(String.init) ?? "—")")
+            Spacer()
+        }
+        .font(.system(size: 11).monospacedDigit())
+        .foregroundColor(.secondary)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 5)
+        .background(Color(nsColor: .windowBackgroundColor))
+        .overlay(alignment: .top) { Divider() }
     }
 }
