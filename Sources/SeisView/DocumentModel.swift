@@ -24,11 +24,7 @@ final class DocumentModel: ObservableObject {
     /// 对比模式下的全部文件；单文件模式为 [file]。
     @Published var files: [SegyFile] = []
     @Published var compareMode: CompareMode = .single
-    @Published var viewport = Viewport() {
-        didSet { if compareMode == .single { scheduleRender() } }
-    }
-    /// 单文件模式下的已渲染图像（后台异步产出，避免在 SwiftUI body 里做磁盘 IO / 解码）。
-    @Published var renderedImage: CGImage?
+    @Published var viewport = Viewport()
     @Published var errorText: String?
     /// 炮索引（FFID → 首道 + 道数）。为空表示尚未构建或构建失败。
     @Published var shots: [Shot] = []
@@ -46,8 +42,6 @@ final class DocumentModel: ObservableObject {
     /// viewport 内已含 gain/palette；键不变则直接复用，避免 SwiftUI body 每遍重解码。
     private var renderKey: (url: URL, viewport: Viewport)?
     private var renderCache: CGImage?
-    /// 待执行的异步渲染任务；滚动/缩放时取消旧的并重新调度（防抖）。
-    private var renderTask: Task<Void, Never>?
 
     /// 屏宽上限：任何情况下 traceSpan 都不超过它，绝不一次解码整炮/整文件。
     static let maxTraceSpan = 1200
@@ -55,7 +49,6 @@ final class DocumentModel: ObservableObject {
     func open(_ url: URL) {
         do {
             let f = try SegyFile.open(url: url)
-            resetRenderState()
             file = f
             files = [f]
             compareMode = .single
@@ -87,7 +80,6 @@ final class DocumentModel: ObservableObject {
                 return
             }
         }
-        resetRenderState()
         file = opened.first
         files = opened
         compareMode = opened.count == 2 ? .overlay : .sideBySide
@@ -119,45 +111,27 @@ final class DocumentModel: ObservableObject {
         viewport = v
     }
 
-    /// 渲染单个文件的剖面图，供多文件对比（并排/叠加）同步使用。
-    /// 单文件模式改用异步 renderedImage（见 scheduleRender），body 里不直接调它。
+    func render() -> CGImage? {
+        guard let f = file else { return nil }
+        return render(file: f, viewport: viewport)
+    }
+
+    /// 渲染单个文件的剖面图，供单文件与多文件对比（并排/叠加）共用。
+    /// 所有 pane 共享同一个 viewport，从而保证联动缩放/平移。
+    /// 键 (file.url, viewport) 未变时直接复用上次渲染结果，避免重复解码。
     func render(file: SegyFile, viewport: Viewport) -> CGImage? {
         if let key = renderKey, key.url == file.url, key.viewport == viewport {
             return renderCache
         }
-        let img = Self.renderDecode(file: file, viewport: viewport)
+        let img = renderDecode(file: file, viewport: viewport)
         renderKey = (url: file.url, viewport: viewport)
         renderCache = img
         return img
     }
 
-    /// 后台渲染调度：取消旧任务，防抖约一帧后离主线程解码，再回主线程发布 renderedImage。
-    /// 主线程永不因磁盘 IO / 解码阻塞，向前/向后滚动同样流畅。
-    private func scheduleRender() {
-        renderTask?.cancel()
-        guard let f = file else { renderedImage = nil; return }
-        let vp = viewport
-        renderTask = Task { [weak self] in
-            try? await Task.sleep(nanoseconds: 16_000_000)   // ~1 帧防抖
-            if Task.isCancelled { return }
-            let img = await Task.detached(priority: .userInitiated) {
-                Self.renderDecode(file: f, viewport: vp)
-            }.value
-            guard !Task.isCancelled else { return }
-            self?.renderedImage = img
-        }
-    }
-
-    /// 打开/重开文件时清空渲染状态（取消在途任务、丢弃旧图）。
-    private func resetRenderState() {
-        renderTask?.cancel()
-        renderTask = nil
-        renderedImage = nil
-    }
-
-    /// 实际解码 + 分箱 + 增益 + 栅格化（纯函数，可在任意线程执行）。
-    /// 纵向缩放：sampleSpan>0 时只解码该采样窗，并按窗高分箱；sampleSpan==0 维持旧行为。
-    private nonisolated static func renderDecode(file: SegyFile, viewport: Viewport) -> CGImage? {
+    /// 实际解码 + 分箱 + 增益 + 栅格化。纵向缩放：sampleSpan>0 时只解码该采样窗，
+    /// 并按窗高分箱；sampleSpan==0 维持旧行为（全采样、h=800）。
+    private func renderDecode(file: SegyFile, viewport: Viewport) -> CGImage? {
         let n = file.geometry.nTraces
         let ns = file.geometry.ns
         let span = min(max(1, viewport.traceSpan), n)
@@ -225,11 +199,9 @@ final class DocumentModel: ObservableObject {
         guard shots.indices.contains(i) else { return }
         currentShotIndex = i
         let shot = shots[i]
-        var v = viewport
-        v.firstTrace = shot.firstTrace
+        viewport.firstTrace = shot.firstTrace
         // 大炮（如 big-file 单炮 ~21000 道）绝不整炮解码：traceSpan 夹到屏宽上限。
-        v.traceSpan = min(shot.count, Self.maxTraceSpan)
-        viewport = v
+        viewport.traceSpan = min(shot.count, Self.maxTraceSpan)
         selectTrace(shot.firstTrace)
     }
 

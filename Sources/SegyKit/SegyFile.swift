@@ -17,7 +17,7 @@ public enum SegyError: Error, CustomStringConvertible {
     }
 }
 
-public final class SegyFile: @unchecked Sendable {
+public final class SegyFile {
     public let url: URL
     public let geometry: Geometry
     public let binaryHeader: BinaryHeader
