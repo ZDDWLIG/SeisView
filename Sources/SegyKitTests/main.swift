@@ -119,6 +119,18 @@ func runAll() {
     let hdrs = rdr.readTraceHeaders(range: 0..<100)
     h.check(hdrs[0].ffid == 42, "readTraceHeaders ffid")
 
+    // Task 6: Decimator（min/max 分箱）
+    // 4 道 × 8 采样 → 高 2 像素，每 bin 4 采样
+    var src: [Float] = []
+    for t in 0..<4 { for s in 0..<8 { src.append(Float(t * 8 + s)) } }
+    let b = Decimator.minMax(src, ns: 8, nTraces: 4, h: 2)
+    h.check(b.w == 4 && b.h == 2, "binned dims")
+    // 道 0 的采样 0..8 → bin0=min(0,3)=0 max=3，bin1=4..7
+    h.check(b.mn[0] == 0 && b.mx[0] == 3, "bin minmax row0")
+    h.check(b.mn[1] == 4 && b.mx[1] == 7, "bin minmax row1")
+    // 道 3 的 bin0 = min(24,27)=24 max=27
+    h.check(b.mn[3 * 2 + 0] == 24 && b.mx[3 * 2 + 0] == 27, "bin minmax trace3")
+
     h.finish()
 }
 runAll()
