@@ -1,0 +1,11 @@
+// swift-tools-version: 6.0
+import PackageDescription
+
+let package = Package(
+    name: "SeisView",
+    targets: [
+        .target(name: "SegyKit"),
+        .executableTarget(name: "SegyKitTests", dependencies: ["SegyKit"]),
+        .executableTarget(name: "SeisView", dependencies: ["SegyKit"]),
+    ]
+)
