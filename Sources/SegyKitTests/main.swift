@@ -1,5 +1,6 @@
 import Foundation
 import SegyKit
+import Localization
 
 @MainActor
 func runAll() {
@@ -654,6 +655,18 @@ func runAll() {
     rs3.sampleSpan = 400; rs3.firstSample = 300
     rs3.zoomSamples(factor: 5.0, ns: 1000)
     h.check(rs3.sampleSpan == 0 && rs3.firstSample == 0, "zoomSamples 放大到 ns 回全采样")
+
+    // MARK: - 本地化：语言判定
+    h.check(Lang.fromSystem(preferred: ["zh-Hans", "en-US"]) == .zh, "fromSystem zh-Hans → zh")
+    h.check(Lang.fromSystem(preferred: ["zh-Hant"]) == .zh, "fromSystem zh-Hant → zh")
+    h.check(Lang.fromSystem(preferred: ["en-US"]) == .en, "fromSystem en-US → en")
+    h.check(Lang.fromSystem(preferred: ["de-DE"]) == .en, "fromSystem de-DE → en")
+    h.check(Lang.fromSystem(preferred: []) == .en, "fromSystem 空列表 → en")
+    // 存过的用户选择优先于系统语言
+    h.check(Lang.resolve(stored: "en", preferred: ["zh-Hans"]) == .en, "resolve 用户选 en 覆盖系统 zh")
+    h.check(Lang.resolve(stored: "zh", preferred: ["en-US"]) == .zh, "resolve 用户选 zh 覆盖系统 en")
+    h.check(Lang.resolve(stored: nil, preferred: ["zh-Hans"]) == .zh, "resolve 未存过回落系统 zh")
+    h.check(Lang.resolve(stored: "klingon", preferred: ["en-US"]) == .en, "resolve 非法存值回落系统")
 
     h.finish()
 }

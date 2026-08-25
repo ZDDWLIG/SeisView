@@ -6,7 +6,8 @@ let package = Package(
     platforms: [.macOS(.v13)],
     targets: [
         .target(name: "SegyKit"),
-        .executableTarget(name: "SegyKitTests", dependencies: ["SegyKit"]),
-        .executableTarget(name: "SeisView", dependencies: ["SegyKit"]),
+        .target(name: "Localization", dependencies: ["SegyKit"]),
+        .executableTarget(name: "SegyKitTests", dependencies: ["SegyKit", "Localization"]),
+        .executableTarget(name: "SeisView", dependencies: ["SegyKit", "Localization"]),
     ]
 )
