@@ -5,14 +5,18 @@ public enum SegyError: Error, CustomStringConvertible {
     case invalidFormatCode(Int)
     case nonIntegerTraceCount(fileSize: UInt64, traceBytes: Int, remainder: UInt64)
     case badSampleCount(binaryHeader: Int, traceHeader: Int)
+    /// 开发者向的技术描述（日志 / 调试用）。用户可见文案在 Localization.userMessage，
+    /// 这里刻意保持语言中性，不参与界面本地化。
     public var description: String {
         switch self {
-        case .fileTooSmall: return "文件小于 3600 字节，不是合法 SEG-Y"
-        case .invalidFormatCode(let c): return "不支持的格式码 \(c)"
+        case .fileTooSmall:
+            return "file is smaller than 3600 bytes; not a valid SEG-Y"
+        case .invalidFormatCode(let c):
+            return "unsupported sample format code \(c)"
         case .nonIntegerTraceCount(let s, let t, let r):
-            return "道长不一致：文件 \(s) 字节 / 道长 \(t) 余 \(r)，疑似变长道"
+            return "trace length mismatch: file \(s) bytes / trace \(t) bytes, remainder \(r) — variable-length traces suspected"
         case .badSampleCount(let b, let t):
-            return "采样点数不一致：二进制头 \(b) vs 道头 \(t)"
+            return "sample count mismatch: binary header \(b) vs trace header \(t)"
         }
     }
 }

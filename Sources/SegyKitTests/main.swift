@@ -698,6 +698,35 @@ func runAll() {
     h.check(format(.statusTraceSpan, .en, ["1200", "多余"]) == "traceSpan 1200", "format 多余参数忽略")
     h.check(string(.tbGain, .zh) == "增益" && string(.tbGain, .en) == "Gain", "string 按语言取值")
 
+    // MARK: - 本地化：错误文案
+    let errCases: [SegyError] = [
+        .fileTooSmall,
+        .invalidFormatCode(9),
+        .nonIntegerTraceCount(fileSize: 1000, traceBytes: 300, remainder: 100),
+        .badSampleCount(binaryHeader: 4000, traceHeader: 1000),
+    ]
+    var errOK = true
+    for e in errCases {
+        for lang in Lang.allCases {
+            let msg = userMessage(for: e, lang)
+            // 非空、且确实走了映射（不是把 description 原样吐出来）
+            if msg.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { errOK = false }
+            if msg == String(describing: e) { errOK = false }
+            if msg.contains("%@") { errOK = false }   // 占位符必须都填上了
+        }
+    }
+    h.check(errOK, "4 个 SegyError 在中英两语下都产出非空、已填充、非原始 description 的文案")
+    h.check(userMessage(for: SegyError.invalidFormatCode(9), .zh).contains("9"),
+            "格式码错误文案带上了实际格式码")
+    h.check(userMessage(for: SegyError.invalidFormatCode(9), .en).contains("9"),
+            "格式码错误文案带上了实际格式码（en）")
+    // 非 SegyError 也要有兜底，不能崩
+    struct OtherError: Error {}
+    h.check(!userMessage(for: OtherError(), .zh).isEmpty, "非 SegyError 有兜底文案")
+    // description 已改成中性英文，不再含中文
+    h.check(!String(describing: SegyError.fileTooSmall).contains("文件"),
+            "SegyError.description 已改为中性英文")
+
     h.finish()
 }
 runAll()
