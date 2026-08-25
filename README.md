@@ -8,7 +8,7 @@ Opening a 9.5 GB, 589,248-trace file renders immediately — no full-file scan, 
 
 **Requirements:** macOS 13 (Ventura) or later. Universal binary — runs natively on both Apple Silicon and Intel Macs.
 
-**Interface language:** the application UI is in Chinese. This documentation is in English.
+**Interface language:** the application UI is available in English and 简体中文. On first launch it follows your system language; you can switch it at any time under **View → Language**, and the choice is remembered and takes effect immediately. Press **⌘?** to open the built-in bilingual user guide. This documentation is in English.
 
 1. **Download** `SeisView-0.1.0.dmg` from the [latest release](https://github.com/ZDDWLIG/SeisView/releases/latest).
    (A `.zip` is also provided if you prefer it over the disk image.)

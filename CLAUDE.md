@@ -1,6 +1,6 @@
 # SeisView — 开发与维护手册
 
-macOS 原生 SEG-Y / SGY 地震数据查看器，对标 Windows 的 SeiSee，核心是超大文件（10 GB 级、数十万道）的**即时显示**。纯 Swift，零第三方依赖。UI 为中文。
+macOS 原生 SEG-Y / SGY 地震数据查看器，对标 Windows 的 SeiSee，核心是超大文件（10 GB 级、数十万道）的**即时显示**。纯 Swift，零第三方依赖。界面支持中文（简体）与 English，首次启动跟随系统语言，可在 View → Language 切换（即时生效、持久记忆），并内置双语使用说明（⌘?）。
 
 ---
 
@@ -39,6 +39,14 @@ SegyKit（纯核心，零 UI 依赖，可独立测试）
 ├── ScrollMetrics.swift 滚动条滑块几何（长度/偏移/像素↔索引反算）
 └── ShotIndex.swift    FFID 炮索引（抽样 + 二分）
 
+Localization（纯文案库，依赖 SegyKit，被 SeisView 与 SegyKitTests 共用）
+├── Lang.swift         语言状态（系统检测 + 用户覆盖）
+├── StringKey.swift    S 枚举（87 个界面文案 key）
+├── Tables.swift       zh/en 两张文案表 + string/format
+├── ErrorText.swift    SegyError → 本地化用户文案
+├── MenuTitles.swift   菜单标题中英反查（纯函数）
+└── HelpContent.swift  双语使用说明九章（结构化数据，中英严格对应）
+
 SeisView（AppKit + SwiftUI）
 ├── SeisViewApp.swift  入口 + 工具栏（增益/百分比/调色板/局部放大/道头开关/重置/对齐/炮导航）+ ZoomBar 缩放条 + LineSlider 单线滑块 + onOpenURL + ContentView/StatusBar
 ├── DocumentModel.swift 已开文件 + 视口状态 + 渲染管线 + showHeaderInspector/zoomRectMode/zoomToRect（@MainActor ObservableObject）
@@ -59,9 +67,9 @@ SegyKitTests（自定义 harness 可执行目标，非 XCTest）
 ## 构建 / 测试 / 运行 / 发布
 
 ```bash
-swift build                       # 构建 3 个 target（SegyKit / SegyKitTests / SeisView）
+swift build                       # 构建 4 个 target（SegyKit / Localization / SegyKitTests / SeisView）
 swift run SeisView                # 直接运行
-swift run SegyKitTests            # 跑测试（当前 165 断言，非零退出码 = 失败）
+swift run SegyKitTests            # 跑测试（当前 207 断言，非零退出码 = 失败）
 
 ./scripts/make_app.sh             # 快速打当前架构的 .app
 ./scripts/release.sh [版本号]      # 通用二进制 + dmg + zip（产出在 dist/）
@@ -166,6 +174,9 @@ swift scripts/make_icon.swift && iconutil -c icns Resources/SeisView.iconset -o 
 - **`traceSpan` 上限 1200 统一在 `Viewport` 层夹**（`decodePlan` 与 `zoomTraces(to:)` 都要夹）；漏夹会让缩放滑块松手整文件解码、卡死主线程。
 - 配色是 256×3 LUT（对照标准 `seismic(iop)`），端点颜色有测试；加配色别只改 `color(for:t:)` 的线性分支，要同步加 LUT。
 - 提交信息也要遵守保密约束（扫历史、不只扫工作树）。
+- **新增任何用户可见文案必须先在 `S` 枚举里加 case，再补齐 `zhTable`/`enTable` 两张表**。漏一边会被 `SegyKitTests` 的完整性断言当场抓住；带占位符的文案两语 `%@` 个数必须相同，否则状态栏参数错位。
+- **菜单栏本地化走 AppKit 而非 SwiftUI**：`.commands` 在 macOS 13 上响应 `@Published` 重建菜单并不可靠，改由 `MainMenuLocalizer` 遍历 `NSApp.mainMenu` 重命名。系统项按 `action` selector 认（selector 不随语言变），其余按标题在中英两表里反查；两类都认不出的项一律不动。启动时的那次 `apply` 必须 `DispatchQueue.main.async` 延后一轮，否则菜单栏还没建好。
+- **`DocumentModel.error` 存的是错误值不是字符串**：文案在视图层按当前语言渲染。别图省事改回存成品字符串——那样切语言时已显示的报错不会跟着变。
 
 ---
 
