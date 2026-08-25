@@ -84,7 +84,7 @@ SEGY_BIG_FILE=/path/to/big.segy swift run SegyKitTests
 swift scripts/make_icon.swift && iconutil -c icns Resources/SeisView.iconset -o Resources/SeisView.icns
 ```
 
-环境：macOS 13+，Swift 6.0+。**只需 Command Line Tools，不需要完整 Xcode**（Metal 着色器运行时编译；`notarytool`/`stapler`/`hdiutil` 都可用）。
+环境：macOS 13+，Swift 6.0+。**只需 Command Line Tools，不需要完整 Xcode**（纯 Swift + SwiftPM、零第三方依赖，无 Xcode 工程与资源 bundle，构建/测试/打包全走命令行；`notarytool`/`stapler`/`hdiutil` 都可用）。
 
 ---
 
@@ -131,8 +131,8 @@ swift scripts/make_icon.swift && iconutil -c icns Resources/SeisView.iconset -o 
 
 - **本机只有 Command Line Tools，无 XCTest / Swift Testing**，测试用自定义 `SegyKitTests` 可执行目标。勿 `import XCTest`/`import Testing`。
 - 顶层可变全局状态必须封在 `@MainActor` 类型里（`Harness`）。
-- `TraceReader` 并行读用 `@unchecked Sendable BufferRef` 包装输出指针（各线程只写互不重叠的道区间，构造上安全）；`SegyFile` 标记 `@unchecked Sendable`（init 后不可变）。
-- `DocumentModel` 是 `@MainActor`；渲染纯函数用 `nonisolated static`（供 `Task.detached` 后台调用）。
+- `TraceReader` 并行读用 `@unchecked Sendable BufferRef` 包装输出指针（各线程只写互不重叠的道区间，构造上安全）；`SegyFile` 未标 `Sendable`（init 后不可变，但跨并发域传不过去），`buildShots` 在 `Task.detached` 里重新 open 文件以绕开严格并发限制。
+- `DocumentModel` 是 `@MainActor`；炮索引构建 `buildShots` 用 `Task.detached` 后台跑（`ShotIndex.build` 是 SegyKit 非 actor 类型的 static 纯函数），渲染仍在主线程同步做。
 - `Viewport` 必须**整体重新赋值**触发 `@Published`（`var v = viewport; v.pan(...); viewport = v`），原地改字段不会发 objectWillChange。
 
 ---
@@ -142,7 +142,7 @@ swift scripts/make_icon.swift && iconutil -c icns Resources/SeisView.iconset -o 
 - **viewport-only I/O**：`renderDecode` 钳 `span = min(max(1, traceSpan), n)`、`traceSpan` 默认 1200，绝不一次解码整文件/整炮。
 - **整道大块读**：`readDecoded` 在 `sampleRange == nil`（横向平移常态）时，一次 `pread` 读整个分区（含 240 道头）再逐道解码；纵向缩放（`sampleRange != nil`）仍按道 `pread`。
 - **两级缓存**（`DocumentModel`）：`imageCache` 按 url 分桶、键为完整 viewport；`binnedCache` 键只含几何（`firstTrace/traceSpan/firstSample/sampleSpan`），**不含增益**。拖百分比滑块时几何未变，直接复用分箱结果，跳过 pread + 解码。按 url 分桶还修掉了对比模式下单条缓存被多个文件互相顶掉、永远 miss 的抖动。
-- **渲染是同步的、在 SwiftUI body 里**。曾尝试异步 + 防抖（`f9132bd`），因图像追不上手势、左右都变卡而被 `git revert`（`567016e`）回退。**不要轻易再上异步渲染**。
+- **渲染是同步的、在 SwiftUI body 里**。曾尝试异步 + 防抖（`3123494`），因图像追不上手势、左右都变卡而被 `git revert`（`567016e`）回退。**不要轻易再上异步渲染**。
 - 左右滚动不对称：向右 = 文件向后顺序读 + OS readahead 预取，快；向左 = 向回读冷页，慢。大块读已缩小差距，但向左客观上仍稍慢，属已知。
 - 性能实测（M5/16GB，9.57GB 文件）：8 线程冷读 21.6ms、热读 2.5ms、IBM 解码 1.2ms(≈1.6GB/s)。瓶颈在 I/O，不在解码。
 
