@@ -750,6 +750,44 @@ func runAll() {
     let crossDup = Set(zhTitles).intersection(Set(enTitles)).sorted()
     h.check(crossDup.isEmpty, "菜单跨语言文案无重叠（撞车：\(crossDup.joined(separator: ", "))）")
 
+    // MARK: - 本地化：Help 结构对齐
+    let zhHelp = helpSections(.zh), enHelp = helpSections(.en)
+    h.check(zhHelp.count == 9, "Help 共 9 章（中文实际 \(zhHelp.count)）")
+    h.check(zhHelp.count == enHelp.count, "Help 中英章节数一致")
+    var helpStructOK = true, helpTitlesOK = true, helpBlocksNonEmpty = true
+    for (z, e) in zip(zhHelp, enHelp) {
+        if z.blocks.count != e.blocks.count { helpStructOK = false }
+        if z.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            || e.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { helpTitlesOK = false }
+        for (zb, eb) in zip(z.blocks, e.blocks) {
+            switch (zb, eb) {
+            case (.paragraph(let a), .paragraph(let b)):
+                if a.isEmpty || b.isEmpty { helpBlocksNonEmpty = false }
+            case (.bullets(let a), .bullets(let b)):
+                if a.count != b.count || a.isEmpty { helpStructOK = false }
+            case (.keyTable(let a), .keyTable(let b)):
+                if a.count != b.count || a.isEmpty { helpStructOK = false }
+            default:
+                helpStructOK = false   // 同位置 block 类型必须相同
+            }
+        }
+    }
+    h.check(helpStructOK, "Help 中英每章 block 数、类型、列表长度逐一对齐")
+    h.check(helpTitlesOK, "Help 每章标题两语都非空")
+    h.check(helpBlocksNonEmpty, "Help 段落两语都非空")
+    // 快捷键表两语的按键写法必须完全相同（⌘O 不该被翻译）
+    var keysIdentical = true
+    for (z, e) in zip(zhHelp, enHelp) {
+        for (zb, eb) in zip(z.blocks, e.blocks) {
+            if case .keyTable(let a) = zb, case .keyTable(let b) = eb {
+                if a.map(\.keys) != b.map(\.keys) { keysIdentical = false }
+                if a.contains(where: { $0.desc.isEmpty }) { keysIdentical = false }
+                if b.contains(where: { $0.desc.isEmpty }) { keysIdentical = false }
+            }
+        }
+    }
+    h.check(keysIdentical, "快捷键表两语按键写法相同、说明都非空")
+
     h.finish()
 }
 runAll()
