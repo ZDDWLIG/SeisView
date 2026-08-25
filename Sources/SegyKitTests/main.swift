@@ -668,6 +668,36 @@ func runAll() {
     h.check(Lang.resolve(stored: nil, preferred: ["zh-Hans"]) == .zh, "resolve 未存过回落系统 zh")
     h.check(Lang.resolve(stored: "klingon", preferred: ["en-US"]) == .en, "resolve 非法存值回落系统")
 
+    // MARK: - 本地化：两表完整性
+    var missingZh = 0, missingEn = 0, emptyCells = 0
+    for k in S.allCases {
+        if zhTable[k] == nil { missingZh += 1 }
+        if enTable[k] == nil { missingEn += 1 }
+        if zhTable[k]?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? false { emptyCells += 1 }
+        if enTable[k]?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? false { emptyCells += 1 }
+    }
+    h.check(missingZh == 0, "每个 key 都有中文文案（缺 \(missingZh) 个）")
+    h.check(missingEn == 0, "每个 key 都有英文文案（缺 \(missingEn) 个）")
+    h.check(emptyCells == 0, "没有空白文案（\(emptyCells) 处）")
+    h.check(Set(zhTable.keys) == Set(S.allCases), "中文表 key 集合 == S.allCases")
+    h.check(Set(enTable.keys) == Set(S.allCases), "英文表 key 集合 == S.allCases")
+
+    // 占位符数量必须一致，否则状态栏参数错位
+    var badPlaceholders: [String] = []
+    for k in S.allCases {
+        let z = placeholderCount(zhTable[k] ?? "")
+        let e = placeholderCount(enTable[k] ?? "")
+        if z != e { badPlaceholders.append("\(k.rawValue)(zh:\(z) en:\(e))") }
+    }
+    h.check(badPlaceholders.isEmpty, "中英占位符数量一致（不一致：\(badPlaceholders.joined(separator: ", "))）")
+
+    // format 行为
+    h.check(format(.statusTraceSpan, .en, ["1200"]) == "traceSpan 1200", "format 单参数替换")
+    h.check(format(.statusShotCurrent, .en, ["3", "57"]) == "Shot 3/57", "format 双参数按顺序替换")
+    h.check(format(.statusShotCurrent, .en, ["3"]).contains("%@"), "format 参数不足时保留剩余占位符、不崩")
+    h.check(format(.statusTraceSpan, .en, ["1200", "多余"]) == "traceSpan 1200", "format 多余参数忽略")
+    h.check(string(.tbGain, .zh) == "增益" && string(.tbGain, .en) == "Gain", "string 按语言取值")
+
     h.finish()
 }
 runAll()
