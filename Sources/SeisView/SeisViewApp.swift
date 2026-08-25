@@ -1,43 +1,56 @@
 import SwiftUI
 import AppKit
 import SegyKit
+import Localization
 
 @main
 struct SeisViewApp: App {
     @StateObject private var model = DocumentModel()
+    @StateObject private var l10n = L10n.shared
+
     var body: some Scene {
         WindowGroup {
-            ContentView(model: model)
+            ContentView(model: model, l10n: l10n)
                 .frame(minWidth: 800, minHeight: 600)
                 .onOpenURL { url in model.open(url) }
+                .onAppear {
+                    // 菜单栏此时可能还没构建完，让出一轮再改标题。
+                    DispatchQueue.main.async { MainMenuLocalizer.apply(l10n.lang) }
+                }
         }
         .commands {
             CommandGroup(replacing: .newItem) {
-                Button("打开 SEG-Y…") {
+                Button(l10n(.menuFileOpen)) {
                     let panel = NSOpenPanel()
                     if panel.runModal() == .OK, let url = panel.url { model.open(url) }
                 }.keyboardShortcut("o")
-                Button("对比…") {
+                Button(l10n(.menuFileCompare)) {
                     let panel = NSOpenPanel()
                     if panel.runModal() == .OK, let url = panel.url {
                         model.addForCompare(url)
                     }
                 }.keyboardShortcut("o", modifiers: [.command, .shift])
             }
-            CommandMenu("视图") {
-                Button("重置视图") { model.resetView() }
+            CommandMenu(l10n(.menuView)) {
+                Button(l10n(.menuViewReset)) { model.resetView() }
                     .keyboardShortcut("0", modifiers: .command)
                     .disabled(model.file == nil)
-                Toggle("显示道头信息", isOn: Binding(
+                Toggle(l10n(.menuViewHeaderToggle), isOn: Binding(
                     get: { model.showHeaderInspector },
                     set: { model.showHeaderInspector = $0 }
                 ))
                 .keyboardShortcut("h", modifiers: [.command, .shift])
+                Divider()
+                // 子菜单固定两项，顺序 [中文, English]——MainMenuLocalizer 依赖这个顺序设勾选态。
+                Menu(l10n(.menuViewLanguage)) {
+                    Button(l10n(.menuLangChinese)) { l10n.set(.zh) }
+                    Button(l10n(.menuLangEnglish)) { l10n.set(.en) }
+                }
             }
-            CommandMenu("导航") {
-                Button("上一炮") { model.goToPreviousShot() }
+            CommandMenu(l10n(.menuNav)) {
+                Button(l10n(.menuNavPrevShot)) { model.goToPreviousShot() }
                     .keyboardShortcut(.leftArrow, modifiers: .command)
-                Button("下一炮") { model.goToNextShot() }
+                Button(l10n(.menuNavNextShot)) { model.goToNextShot() }
                     .keyboardShortcut(.rightArrow, modifiers: .command)
             }
         }
@@ -46,13 +59,16 @@ struct SeisViewApp: App {
 
 struct ContentView: View {
     @ObservedObject var model: DocumentModel
+    @ObservedObject var l10n: L10n
+
     var body: some View {
         VStack(spacing: 0) {
             if model.file != nil || model.compareMode != .single {
-                ZoomBar(model: model)
+                ZoomBar(model: model, l10n: l10n)
             }
-            if let e = model.errorText {
-                Text(e).foregroundColor(.red).padding()
+            if let e = model.error {
+                // 存的是错误值而非成品字符串，切语言时这里会跟着重算。
+                Text(errorMessage(e, l10n)).foregroundColor(.red).padding()
             } else if model.compareMode != .single, model.files.count >= 2 {
                 HStack(spacing: 0) {
                     ScrolledSection(model: model,
@@ -62,11 +78,11 @@ struct ContentView: View {
                     }
                     if model.showHeaderInspector {
                         Divider()
-                        HeaderInspector(model: model)
+                        HeaderInspector(model: model, l10n: l10n)
                             .frame(width: 230)
                     }
                 }
-                StatusBar(model: model, nTraces: model.files[0].geometry.nTraces)
+                StatusBar(model: model, l10n: l10n, nTraces: model.files[0].geometry.nTraces)
             } else if let f = model.file {
                 HStack(spacing: 0) {
                     ScrolledSection(model: model,
@@ -77,13 +93,13 @@ struct ContentView: View {
                     }
                     if model.showHeaderInspector {
                         Divider()
-                        HeaderInspector(model: model)
+                        HeaderInspector(model: model, l10n: l10n)
                             .frame(width: 230)
                     }
                 }
-                StatusBar(model: model, nTraces: f.geometry.nTraces)
+                StatusBar(model: model, l10n: l10n, nTraces: f.geometry.nTraces)
             } else {
-                Text("⌘O 打开 SEG-Y 文件").foregroundColor(.secondary)
+                Text(l10n(.emptyOpenHint)).foregroundColor(.secondary)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
@@ -91,16 +107,16 @@ struct ContentView: View {
             ToolbarItemGroup {
                 // 绑 GainKind 而不是 GainMode：百分位载荷随滑块变，若 tag 写死载荷，
                 // 一调百分比 selection 就匹配不上任何选项、Picker 会变空白。
-                Picker("增益", selection: Binding(
+                Picker(l10n(.tbGain), selection: Binding(
                     get: { model.viewport.gain.kind },
                     set: { model.setGainKind($0) }
                 )) {
-                    Text("百分位").tag(GainKind.percentiles)
-                    Text("AGC").tag(GainKind.agc)
-                    Text("每道").tag(GainKind.perTrace)
-                    Text("最大幅值").tag(GainKind.maxAbs)
+                    Text(l10n(.gainPercentiles)).tag(GainKind.percentiles)
+                    Text(l10n(.gainAGC)).tag(GainKind.agc)
+                    Text(l10n(.gainPerTrace)).tag(GainKind.perTrace)
+                    Text(l10n(.gainMaxAbs)).tag(GainKind.maxAbs)
                 }
-                .help("增益方式")
+                .help(l10n(.tbGainHelp))
                 if model.viewport.gain.kind == .percentiles {
                     LineSlider(
                         value: Binding(
@@ -110,13 +126,13 @@ struct ContentView: View {
                         range: Viewport.clipPercentRange
                     )
                     .frame(width: 110, height: 20)
-                    .help("百分位裁剪：保留中间百分比，越小对比越强")
+                    .help(l10n(.tbClipHelp))
                     Text(String(format: "%.1f%%", model.viewport.clipPercent))
                         .font(.system(size: 11).monospacedDigit())
                         .foregroundColor(.secondary)
                         .frame(width: 44, alignment: .leading)
                 }
-                Picker("调色板", selection: Binding(
+                Picker(l10n(.tbPalette), selection: Binding(
                     get: { model.viewport.palette },
                     set: { p in
                         var v = model.viewport
@@ -124,46 +140,48 @@ struct ContentView: View {
                         model.viewport = v
                     }
                 )) {
-                    Text("灰度").tag(Palette.grayscale)
-                    Text("红白蓝").tag(Palette.redWhiteBlue)
-                    Text("红白黑").tag(Palette.redWhiteBlack)
-                    Text("棕白黑").tag(Palette.brownWhiteBlack)
+                    Text(l10n(.paletteGray)).tag(Palette.grayscale)
+                    Text(l10n(.paletteRedWhiteBlue)).tag(Palette.redWhiteBlue)
+                    Text(l10n(.paletteRedWhiteBlack)).tag(Palette.redWhiteBlack)
+                    Text(l10n(.paletteBrownWhiteBlack)).tag(Palette.brownWhiteBlack)
                 }
-                .help("调色板")
+                .help(l10n(.tbPalette))
                 Toggle(isOn: Binding(
                     get: { model.showHeaderInspector },
                     set: { model.showHeaderInspector = $0 }
                 )) {
-                    Text("道头信息")
+                    Text(l10n(.tbHeaderToggle))
                 }
-                .help("显示/隐藏右侧道头信息框")
+                .help(l10n(.tbHeaderToggleHelp))
                 Toggle(isOn: Binding(
                     get: { model.zoomRectMode },
                     set: { model.zoomRectMode = $0 }
                 )) {
-                    Label("局部放大", systemImage: "rectangle.dashed")
+                    Label(l10n(.tbZoomRect), systemImage: "rectangle.dashed")
                 }
                 .toggleStyle(.button)
-                .help("局部放大：双指点击（右键）拖动框选剖面区域，松开放大到该区域")
+                .help(l10n(.tbZoomRectHelp))
                 .disabled(model.file == nil)
                 if model.compareMode != .single {
-                    Button { model.resetView() } label: { Label("对齐", systemImage: "align.horizontal.center") }
-                        .help("对齐：所有窗口回到相同道号/采样号起点")
+                    Button { model.resetView() } label: {
+                        Label(l10n(.tbAlign), systemImage: "align.horizontal.center")
+                    }
+                    .help(l10n(.tbAlignHelp))
                 }
                 Button { model.resetView() } label: {
-                    Label("重置视图", systemImage: "arrow.counterclockwise")
+                    Label(l10n(.tbReset), systemImage: "arrow.counterclockwise")
                 }
-                .help("重置视图（⌘0）：位置与缩放回到初始窗口，保留增益与调色板")
+                .help(l10n(.tbResetHelp))
                 .disabled(model.file == nil)
                 Button { model.goToPreviousShot() } label: {
-                    Label("上一炮", systemImage: "chevron.left")
+                    Label(l10n(.tbPrevShot), systemImage: "chevron.left")
                 }
-                .help("上一炮")
+                .help(l10n(.tbPrevShotHelp))
                 .disabled(model.shots.isEmpty)
                 Button { model.goToNextShot() } label: {
-                    Label("下一炮", systemImage: "chevron.right")
+                    Label(l10n(.tbNextShot), systemImage: "chevron.right")
                 }
-                .help("下一炮")
+                .help(l10n(.tbNextShotHelp))
                 .disabled(model.shots.isEmpty)
             }
         }
@@ -174,16 +192,17 @@ struct ContentView: View {
 /// 放这里而不是工具栏，避免两个 Slider 被并进同一个工具栏槽。
 struct ZoomBar: View {
     @ObservedObject var model: DocumentModel
+    @ObservedObject var l10n: L10n
 
     var body: some View {
         HStack(spacing: 16) {
-            Text("道方向").font(.system(size: 11)).foregroundColor(.secondary)
+            Text(l10n(.zoomTraceAxis)).font(.system(size: 11)).foregroundColor(.secondary)
             ZoomSlider { model.zoomTraces(by: $0) }
-                .help("道方向缩放：左拖=放大，右拖=显示更多道，松手回中")
+                .help(l10n(.zoomTraceAxisHelp))
             Divider().frame(height: 20)
-            Text("时间方向").font(.system(size: 11)).foregroundColor(.secondary)
+            Text(l10n(.zoomTimeAxis)).font(.system(size: 11)).foregroundColor(.secondary)
             ZoomSlider { model.zoomSamples(by: $0) }
-                .help("时间方向缩放：左拖=放大，右拖=显示更多采样，松手回中")
+                .help(l10n(.zoomTimeAxisHelp))
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 6)
@@ -266,11 +285,13 @@ struct LineSlider: NSViewRepresentable {
 /// 底部状态栏：视口位置 / 跨度 / 采样跨度 / 光标道号。
 struct StatusBar: View {
     @ObservedObject var model: DocumentModel
+    @ObservedObject var l10n: L10n
     @ObservedObject var cursor: CursorStore
     let nTraces: Int
 
-    init(model: DocumentModel, nTraces: Int) {
+    init(model: DocumentModel, l10n: L10n, nTraces: Int) {
         self.model = model
+        self.l10n = l10n
         self.cursor = model.cursor
         self.nTraces = nTraces
     }
@@ -283,17 +304,17 @@ struct StatusBar: View {
         let sSpan = vp.sampleSpan > 0 ? min(vp.sampleSpan, ns) : ns
         let sLast = min(vp.firstSample + sSpan, ns)
         HStack(spacing: 16) {
-            Text("道 \(first + 1)–\(last + 1) / \(nTraces)")
-            Text("采样 \(vp.firstSample + 1)–\(sLast) / \(ns)")
-            Text("traceSpan \(vp.traceSpan)")
-            Text("光标道 \(cursor.trace.map(String.init) ?? "—")")
+            Text(l10n.f(.statusTraces, ["\(first + 1)", "\(last + 1)", "\(nTraces)"]))
+            Text(l10n.f(.statusSamples, ["\(vp.firstSample + 1)", "\(sLast)", "\(ns)"]))
+            Text(l10n.f(.statusTraceSpan, ["\(vp.traceSpan)"]))
+            Text(l10n.f(.statusCursor, [cursor.trace.map(String.init) ?? l10n(.statusCursorNone)]))
             if model.shotsReady {
-                Text("炮索引：\(model.shots.count) 炮")
+                Text(l10n.f(.statusShotCount, ["\(model.shots.count)"]))
                 if !model.shots.isEmpty {
-                    Text("炮 \(model.currentShotIndex + 1)/\(model.shots.count)")
+                    Text(l10n.f(.statusShotCurrent, ["\(model.currentShotIndex + 1)", "\(model.shots.count)"]))
                 }
             } else {
-                Text("炮索引：构建中…")
+                Text(l10n(.statusShotBuilding))
             }
             Spacer()
         }

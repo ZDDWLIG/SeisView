@@ -29,3 +29,10 @@ final class L10n: ObservableObject {
     /// 带占位符的文案。
     func f(_ k: S, _ args: [String]) -> String { format(k, lang, args) }
 }
+
+/// 把任意错误渲染成当前语言的文案。AppError 走自带 key，其余交给 Localization.userMessage。
+@MainActor
+func errorMessage(_ e: Error, _ l10n: L10n) -> String {
+    if let a = e as? AppError { return l10n.f(a.key, a.args) }
+    return userMessage(for: e, l10n.lang)
+}

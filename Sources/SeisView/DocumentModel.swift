@@ -2,6 +2,7 @@ import Foundation
 import CoreGraphics
 import SegyKit
 import Combine
+import Localization
 
 /// 光标处信息（独立于 DocumentModel 发布，避免鼠标移动触发整段重渲染）。
 @MainActor
@@ -17,6 +18,13 @@ enum CompareMode: Hashable {
     case sideBySide
 }
 
+/// App 自身产生的、非 SegyKit 的错误。携带 key 与参数，渲染推迟到视图层，
+/// 这样切语言时已显示的报错也会跟着变。
+struct AppError: Error {
+    let key: S
+    let args: [String]
+}
+
 @MainActor
 final class DocumentModel: ObservableObject {
     @Published var file: SegyFile?
@@ -24,7 +32,8 @@ final class DocumentModel: ObservableObject {
     @Published var files: [SegyFile] = []
     @Published var compareMode: CompareMode = .single
     @Published var viewport = Viewport()
-    @Published var errorText: String?
+    /// 存错误值而非成品字符串：文案在视图层按当前语言渲染，切语言时报错也跟着变。
+    @Published var error: Error?
     /// 炮索引（FFID → 首道 + 道数）。为空表示尚未构建或构建失败。
     @Published var shots: [Shot] = []
     /// 炮索引是否已构建完成（供状态栏显示「构建中… / N 炮」）。
@@ -71,10 +80,10 @@ final class DocumentModel: ObservableObject {
             shotsReady = false
             currentShotIndex = 0
             zoomRectMode = false
-            errorText = nil
+            error = nil
             imageCache.removeAll(); binnedCache.removeAll()
             buildShots()
-        } catch { errorText = String(describing: error) }
+        } catch { self.error = error }
     }
 
     /// 追加一个文件进对比：已开一个 → 并排；已在对比如继续追加；没开文件 → 直接打开它。
@@ -83,7 +92,7 @@ final class DocumentModel: ObservableObject {
         do {
             let f = try SegyFile.open(url: url)
             if files.contains(where: { $0.url == url }) {
-                errorText = "已在对比中：\(url.lastPathComponent)"
+                error = AppError(key: .errAlreadyComparing, args: [url.lastPathComponent])
                 return
             }
             if files.isEmpty {
@@ -101,11 +110,11 @@ final class DocumentModel: ObservableObject {
             shotsReady = false
             currentShotIndex = 0
             zoomRectMode = false
-            errorText = nil
+            error = nil
             imageCache.removeAll(); binnedCache.removeAll()
             buildShots()
-        } catch {
-            errorText = "打开失败 \(url.lastPathComponent)：\(error)"
+        } catch let e {
+            error = AppError(key: .errOpenFailed, args: [url.lastPathComponent, String(describing: e)])
         }
     }
 
