@@ -33,17 +33,19 @@ SegyKit（纯核心，零 UI 依赖，可独立测试）
 ├── SegyFile.swift     打开、头解析、几何推断与校验、假 IBM 自动校正
 ├── TraceReader.swift  并行 pread + 解码（每线程独立 fd，整道大块读）
 ├── Decimator.swift    min/max 分箱降采样
-├── Gain.swift         百分位 / AGC / 每道 / maxAbs 标定
-├── Rasterizer.swift   振幅 → CGImage（灰度 + seismic 调色板）
+├── Gain.swift         百分位 / AGC / 每道 / maxAbs 标定 + GainKind（去载荷的种类）
+├── Rasterizer.swift   振幅 → CGImage（灰度/红白蓝/红白黑/棕白黑 4 配色，256×3 LUT）
+├── Viewport.swift     纯值类型视口状态 + 平移/缩放/重置/百分比换算 + decodePlan + 中心锚缩放 + 缩放映射 + maxTraceSpan 上限
+├── ScrollMetrics.swift 滚动条滑块几何（长度/偏移/像素↔索引反算）
 └── ShotIndex.swift    FFID 炮索引（抽样 + 二分）
 
 SeisView（AppKit + SwiftUI）
-├── SeisViewApp.swift  入口 + 工具栏（增益/调色板/对比方式/炮导航）+ ContentView/StatusBar
-├── DocumentModel.swift 已开文件 + 视口状态 + 渲染管线（@MainActor ObservableObject）
-├── Viewport.swift      纯值类型视口状态（firstTrace/traceSpan/firstSample/sampleSpan/gain/palette）
-├── SectionView.swift   剖面显示（NSViewRepresentable + 滚轮/捏合/点击选道/光标）
+├── SeisViewApp.swift  入口 + 工具栏（增益/百分比/调色板/局部放大/道头开关/重置/对齐/炮导航）+ ZoomBar 缩放条 + LineSlider 单线滑块 + onOpenURL + ContentView/StatusBar
+├── DocumentModel.swift 已开文件 + 视口状态 + 渲染管线 + showHeaderInspector/zoomRectMode/zoomToRect（@MainActor ObservableObject）
+├── SectionView.swift   剖面显示（NSViewRepresentable + 双向滚轮平移/捏合/点击选道/右键框选缩放/光标）
+├── ScrollBar.swift     自绘水平/垂直滚动条 + ScrolledSection 包裹布局
 ├── HeaderInspector.swift 道头表格（字节位置 + 值）
-└── CompareLayout.swift  多文件并排 / 叠加
+└── CompareLayout.swift  多文件并排（HSplitView 可拖动分隔）
 
 SegyKitTests（自定义 harness 可执行目标，非 XCTest）
 ├── Harness.swift      @MainActor 断言工具（check/checkClose/checkRel/finish）
@@ -59,7 +61,7 @@ SegyKitTests（自定义 harness 可执行目标，非 XCTest）
 ```bash
 swift build                       # 构建 3 个 target（SegyKit / SegyKitTests / SeisView）
 swift run SeisView                # 直接运行
-swift run SegyKitTests            # 跑测试（当前 84 断言，非零退出码 = 失败）
+swift run SegyKitTests            # 跑测试（当前 165 断言，非零退出码 = 失败）
 
 ./scripts/make_app.sh             # 快速打当前架构的 .app
 ./scripts/release.sh [版本号]      # 通用二进制 + dmg + zip（产出在 dist/）
@@ -128,6 +130,7 @@ swift scripts/make_icon.swift && iconutil -c icns Resources/SeisView.iconset -o 
 
 - **viewport-only I/O**：`renderDecode` 钳 `span = min(max(1, traceSpan), n)`、`traceSpan` 默认 1200，绝不一次解码整文件/整炮。
 - **整道大块读**：`readDecoded` 在 `sampleRange == nil`（横向平移常态）时，一次 `pread` 读整个分区（含 240 道头）再逐道解码；纵向缩放（`sampleRange != nil`）仍按道 `pread`。
+- **两级缓存**（`DocumentModel`）：`imageCache` 按 url 分桶、键为完整 viewport；`binnedCache` 键只含几何（`firstTrace/traceSpan/firstSample/sampleSpan`），**不含增益**。拖百分比滑块时几何未变，直接复用分箱结果，跳过 pread + 解码。按 url 分桶还修掉了对比模式下单条缓存被多个文件互相顶掉、永远 miss 的抖动。
 - **渲染是同步的、在 SwiftUI body 里**。曾尝试异步 + 防抖（`f9132bd`），因图像追不上手势、左右都变卡而被 `git revert`（`567016e`）回退。**不要轻易再上异步渲染**。
 - 左右滚动不对称：向右 = 文件向后顺序读 + OS readahead 预取，快；向左 = 向回读冷页，慢。大块读已缩小差距，但向左客观上仍稍慢，属已知。
 - 性能实测（M5/16GB，9.57GB 文件）：8 线程冷读 21.6ms、热读 2.5ms、IBM 解码 1.2ms(≈1.6GB/s)。瓶颈在 I/O，不在解码。
@@ -138,8 +141,12 @@ swift scripts/make_icon.swift && iconutil -c icns Resources/SeisView.iconset -o 
 
 - 无 Wiggle 波形显示（仅变密度）
 - ShotIndex 无 spec 里的「多炮区间退化为线性全扫」回退——单炮 < 256 道的文件会漏边界（目标数据单炮 ~2 万道，安全）
-- 纵向缩放已接线（sampleSpan→sampleRange），但 `firstSample` 纵向平移（拖拽上下）未做
+- 触控板滚动：横向→道号平移、纵向→采样平移（方向符号已按用户习惯反转）；采样平移仅纵向缩放（`sampleSpan>0`）后可用，全采样铺满时纵向无可滚余量
+- 垂直滚动条只在纵向缩放后（`sampleSpan>0`）可用；默认全采样铺满时无可滚余量，呈禁用态
 - 对比模式渲染仍是同步的（未异步）
+- 对比 = 单文件打开后，「对比…」**单选追加**一个文件、并排显示（**无叠加模式**，`CompareMode` 只有 `.single`/`.sideBySide`）；所有 pane 共享 viewport，滚动/缩放/对齐天然联动；并排 pane 用 `HSplitView`（分隔条可拖动调整宽度）
+- 道/时间缩放滑块是**相对缩放 + 松手回中**：左拖放大、右拖缩小，效果保留、把手回中点；跨 `sampleSpan==0`（全采样）与窗口化时用连续乘算避免跳变
+- 缩放滑块在**正文顶部 `ZoomBar`**（不在工具栏，避免两个 Slider 被并进同一工具栏槽）；**拖动期间只动把手、不触发渲染，松手才应用一次缩放**——否则拖动时每个 tick 都改 viewport → 整段重解码，卡死主线程
 - 无频谱、图片导出、数据写回
 - 未 Apple 公证（免费路，ad-hoc 签名；接收方首次右键→打开）
 
@@ -148,8 +155,16 @@ swift scripts/make_icon.swift && iconutil -c icns Resources/SeisView.iconset -o 
 ## 常见坑（future dev 备忘）
 
 - **NSOpenPanel 别用 `allowedContentTypes = [UTType(filenameExtension: "sgy")...]`**：自定义扩展名的动态 UTType 跟文件实际类型对不上，会把 .sgy/.segy 全部置灰。干脆不设过滤，靠 `SegyFile.open` 校验。
+- **Finder 双击打开靠 `.onOpenURL`**（挂在 WindowGroup 内容上）。`Info.plist` 的 `CFBundleDocumentTypes` 只是声明「能打开」，真正接文件的是 `.onOpenURL`；没有它，双击/`open -a` 都会静默无效。别用 `DocumentGroup`——那会改整个文件模型。
 - `Package.swift` 声明了 `SeisView` 可执行 target，但 `@main` 在 `SeisViewApp.swift`——模块里不能同时有 `main.swift` 顶层代码。
 - 增益/调色板在 `Viewport` 里，改它们也要整体重赋值 `viewport` 才能触发重渲染。
+- **Picker 的 tag 绝不能写死带载荷的 enum case**。曾经 `.tag(GainMode.percentiles(0.01, 0.99))`，百分比一可调，`selection` 就匹配不上任何 tag、控件变空白。改为绑 `GainKind`（去掉载荷的种类），载荷由 `Viewport.setGainKind` 用记住的参数重建。
+- 百分比的真值只有 `Viewport.clipPercent` 一个，`gain` 的百分位载荷由它派生（`setClipPercent`）。别再单独改 `gain` 的载荷，否则两者漂移。
+- 视口越界钳制统一在 `Viewport.decodePlan` 里（纯函数、有测试）。别在 `DocumentModel` 里另写一份。
+- **NSViewRepresentable 的 `@Published` 状态要作为值参数传入**（如 `SectionView.zoomRectMode`）：只在 `updateNSView` 里读 `model.xxx`，SwiftUI 会因「输入没变」跳过 `updateNSView`，视图层收不到状态变化。
+- **双指点击 = 右键**：`rightMouseDown/rightMouseDragged/rightMouseUp`（macOS 触控板「辅助点按」即右键）。
+- **`traceSpan` 上限 1200 统一在 `Viewport` 层夹**（`decodePlan` 与 `zoomTraces(to:)` 都要夹）；漏夹会让缩放滑块松手整文件解码、卡死主线程。
+- 配色是 256×3 LUT（对照标准 `seismic(iop)`），端点颜色有测试；加配色别只改 `color(for:t:)` 的线性分支，要同步加 LUT。
 - 提交信息也要遵守保密约束（扫历史、不只扫工作树）。
 
 ---
@@ -167,3 +182,7 @@ swift scripts/make_icon.swift && iconutil -c icns Resources/SeisView.iconset -o 
 7. 异步渲染尝试后回退（图像追不上手势）。
 8. 假 IBM 自动校正用 sanity 阈值（小振幅才能触发，测试数据需用 `Float(s)*1e-4` 而非 `Float(s)`）。
 9. 打包走免费路：通用二进制 + ad-hoc 签名 + dmg/zip；公证留待有 Developer ID 后再加。
+10. 对比 pane 改 `HSplitView` 可拖动分隔（替换 GeometryReader 均分，修宽度被图像内在尺寸撑偏）。
+11. 配色收敛为 4 种 LUT：灰度 / 红白蓝 / 红白黑 / 棕白黑（删去旧「地震/自定义」名）。
+12. 局部放大用右键（双指点击）框选；`zoomRectMode` 作为 `SectionView` 值参数传入，松手 `zoomToRect` 放大并退出。
+13. 触控板滚动改双向平移（横向→道号、纵向→采样），方向按用户习惯反号。

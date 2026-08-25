@@ -11,11 +11,10 @@ final class CursorStore: ObservableObject {
     func setTrace(_ t: Int?) { trace = t }
 }
 
-/// 显示模式：单文件 / 并排对比 / 叠加对比。
+/// 显示模式：单文件 / 并排对比。
 enum CompareMode: Hashable {
     case single
     case sideBySide
-    case overlay
 }
 
 @MainActor
@@ -36,15 +35,27 @@ final class DocumentModel: ObservableObject {
     @Published var selectedTrace = 0
     /// 选中道的道头（由 selectTrace 读取，避免在视图 body 里做磁盘 IO）。
     @Published var selectedHeader: TraceHeader?
+    /// 是否显示最右侧的道头信息框（可在「视图」菜单里切换）。
+    @Published var showHeaderInspector = true
+    /// 局部放大模式：为 true 时在剖面上框选矩形、松开后放大到该区域（一次性，放大后自动退出）。
+    @Published var zoomRectMode = false
     let reader: TraceReader? = nil
     let cursor = CursorStore()
-    /// 渲染缓存：最后一次渲染的图像及其 (file.url, viewport) 键。
-    /// viewport 内已含 gain/palette；键不变则直接复用，避免 SwiftUI body 每遍重解码。
-    private var renderKey: (url: URL, viewport: Viewport)?
-    private var renderCache: CGImage?
+    /// 图像缓存：按文件分桶，键为完整 viewport（含 gain/palette）。
+    /// 分桶是因为对比模式下同一 body 里要渲染 2+ 个文件，单条缓存会被互相顶掉、永远 miss。
+    private var imageCache: [URL: (viewport: Viewport, image: CGImage)] = [:]
+    /// 解码+分箱缓存：键只含几何（firstTrace/traceSpan/firstSample/sampleSpan），**不含增益**。
+    /// 拖百分比滑块时几何没变，靠它跳过 pread + 解码 + 分箱，只重跑增益与栅格化。
+    private var binnedCache: [URL: (key: GeomKey, binned: Binned)] = [:]
 
-    /// 屏宽上限：任何情况下 traceSpan 都不超过它，绝不一次解码整炮/整文件。
-    static let maxTraceSpan = 1200
+    /// 决定解码结果的那部分视口状态。增益/调色板不在其中——它们只影响之后的着色。
+    private struct GeomKey: Equatable {
+        let firstTrace: Int, traceSpan: Int, firstSample: Int, sampleSpan: Int
+        init(_ v: Viewport) {
+            firstTrace = v.firstTrace; traceSpan = v.traceSpan
+            firstSample = v.firstSample; sampleSpan = v.sampleSpan
+        }
+    }
 
     func open(_ url: URL) {
         do {
@@ -59,40 +70,43 @@ final class DocumentModel: ObservableObject {
             shots = []
             shotsReady = false
             currentShotIndex = 0
+            zoomRectMode = false
             errorText = nil
-            renderKey = nil; renderCache = nil
+            imageCache.removeAll(); binnedCache.removeAll()
             buildShots()
         } catch { errorText = String(describing: error) }
     }
 
-    /// 打开 2+ 个文件进入对比模式：恰好两个默认叠加，更多则并排。
-    /// 任一文件打开失败则整体放弃并提示，保持当前状态不变。
-    func openCompare(_ urls: [URL]) {
-        guard urls.count >= 2 else {
-            errorText = "对比至少需要两个文件"
-            return
-        }
-        var opened: [SegyFile] = []
-        for url in urls {
-            do { opened.append(try SegyFile.open(url: url)) }
-            catch {
-                errorText = "打开失败 \(url.lastPathComponent)：\(error)"
+    /// 追加一个文件进对比：已开一个 → 并排；已在对比如继续追加；没开文件 → 直接打开它。
+    /// 与当前已开文件重复时忽略（避免跟自身上比）。
+    func addForCompare(_ url: URL) {
+        do {
+            let f = try SegyFile.open(url: url)
+            if files.contains(where: { $0.url == url }) {
+                errorText = "已在对比中：\(url.lastPathComponent)"
                 return
             }
+            if files.isEmpty {
+                open(url)
+                return
+            }
+            files.append(f)
+            file = files.first
+            compareMode = .sideBySide
+            viewport = Viewport()
+            cursor.setTrace(nil)
+            selectedTrace = 0
+            selectedHeader = nil
+            shots = []
+            shotsReady = false
+            currentShotIndex = 0
+            zoomRectMode = false
+            errorText = nil
+            imageCache.removeAll(); binnedCache.removeAll()
+            buildShots()
+        } catch {
+            errorText = "打开失败 \(url.lastPathComponent)：\(error)"
         }
-        file = opened.first
-        files = opened
-        compareMode = opened.count == 2 ? .overlay : .sideBySide
-        viewport = Viewport()
-        cursor.setTrace(nil)
-        selectedTrace = 0
-        selectedHeader = nil
-        shots = []
-        shotsReady = false
-        currentShotIndex = 0
-        errorText = nil
-        renderKey = nil; renderCache = nil
-        buildShots()
     }
 
     /// 沿道号平移视口。整体重新赋值 viewport，保证 @Published 发出 objectWillChange。
@@ -103,11 +117,108 @@ final class DocumentModel: ObservableObject {
         viewport = v
     }
 
-    /// 采样轴缩放（更新 sampleSpan；渲染接线见 Viewport.zoom 注释）。
+    /// 沿采样轴平移视口（垂直滚动条翻页用）。
+    func panSamples(dSamples: Int) {
+        guard let f = file else { return }
+        var v = viewport
+        v.panSamples(dSamples: dSamples, ns: f.geometry.ns)
+        viewport = v
+    }
+
+    /// 采样轴缩放（更新 sampleSpan；zoom 内部会把 firstSample 钳回合法范围）。
     func zoom(timeFactor: Double) {
         guard let f = file else { return }
         var v = viewport
         v.zoom(timeFactor: timeFactor, ns: f.geometry.ns)
+        viewport = v
+    }
+
+    /// 横向相对缩放（滑块）：factor<1 放大、factor>1 缩小，中心锚。
+    func zoomTraces(by factor: Double) {
+        guard let f = file else { return }
+        var v = viewport
+        v.zoomTraces(factor: factor, total: f.geometry.nTraces)
+        viewport = v
+    }
+
+    /// 纵向相对缩放（滑块）：factor<1 放大、factor>1 缩小，中心锚，全采样↔窗口化平滑过渡。
+    func zoomSamples(by factor: Double) {
+        guard let f = file else { return }
+        var v = viewport
+        v.zoomSamples(factor: factor, ns: f.geometry.ns)
+        viewport = v
+    }
+
+    /// 局部放大：把框选矩形（归一化坐标 x/y ∈ [0,1]，原点在左下）换算成新的视口窗口。
+    /// x → 道号范围，y → 采样号范围（y=1 是图像顶部、采样号最小处）。一次性，放大后退出模式。
+    func zoomToRect(normalized r: CGRect) {
+        guard let f = file, r.width > 0.001, r.height > 0.001 else {
+            zoomRectMode = false
+            return
+        }
+        let n = f.geometry.nTraces
+        let ns = f.geometry.ns
+        var v = viewport
+
+        let shownTraces = min(max(1, v.traceSpan), n)
+        let t0 = v.firstTrace + Int(r.minX * CGFloat(shownTraces))
+        let t1 = v.firstTrace + Int(r.maxX * CGFloat(shownTraces))
+
+        let shownSamples = v.sampleSpan > 0 ? v.sampleSpan : ns
+        let sTop = v.firstSample + Int((1 - r.maxY) * CGFloat(shownSamples))
+        let sBottom = v.firstSample + Int((1 - r.minY) * CGFloat(shownSamples))
+
+        v.firstTrace = max(0, min(t0, n - 1))
+        v.traceSpan = max(1, min(t1 - t0, Viewport.maxTraceSpan))
+        v.firstSample = max(0, min(sTop, ns - 1))
+        v.sampleSpan = max(1, min(sBottom - sTop, ns))
+        if v.sampleSpan >= ns {
+            v.sampleSpan = 0
+            v.firstSample = 0
+        }
+        viewport = v
+        zoomRectMode = false
+    }
+
+    /// 回到初始显示窗口：位置与缩放归默认，保留增益/百分比/调色板。
+    /// firstTrace 归零后画面回到第一炮，currentShotIndex 也要跟上，否则状态栏自相矛盾。
+    func resetView() {
+        var v = viewport
+        v.resetView()
+        viewport = v
+        currentShotIndex = 0
+        zoomRectMode = false
+    }
+
+    /// 水平滚动条：直接定位到某道（绝对位置）。
+    func scrollToTrace(_ t: Int) {
+        guard let f = file else { return }
+        let n = f.geometry.nTraces
+        var v = viewport
+        let span = min(max(1, v.traceSpan), n)
+        v.firstTrace = max(0, min(t, max(0, n - span)))
+        viewport = v
+    }
+
+    /// 垂直滚动条：直接定位到某采样（绝对位置）。
+    func scrollToSample(_ s: Int) {
+        guard let f = file else { return }
+        var v = viewport
+        v.firstSample = max(0, min(s, v.maxFirstSample(ns: f.geometry.ns)))
+        viewport = v
+    }
+
+    /// 百分位裁剪比例（工具栏滑块）。
+    func setClipPercent(_ p: Double) {
+        var v = viewport
+        v.setClipPercent(p)
+        viewport = v
+    }
+
+    /// 增益方式（工具栏 Picker 绑 GainKind，载荷由 Viewport 用记住的参数重建）。
+    func setGainKind(_ k: GainKind) {
+        var v = viewport
+        v.setGainKind(k)
         viewport = v
     }
 
@@ -116,45 +227,34 @@ final class DocumentModel: ObservableObject {
         return render(file: f, viewport: viewport)
     }
 
-    /// 渲染单个文件的剖面图，供单文件与多文件对比（并排/叠加）共用。
+    /// 渲染单个文件的剖面图，供单文件与多文件并排对比共用。
     /// 所有 pane 共享同一个 viewport，从而保证联动缩放/平移。
-    /// 键 (file.url, viewport) 未变时直接复用上次渲染结果，避免重复解码。
+    /// 两级缓存：viewport 完全未变 → 直接返回图像；只有增益/调色板变 → 复用分箱结果，跳过 I/O。
     func render(file: SegyFile, viewport: Viewport) -> CGImage? {
-        if let key = renderKey, key.url == file.url, key.viewport == viewport {
-            return renderCache
+        if let hit = imageCache[file.url], hit.viewport == viewport {
+            return hit.image
         }
-        let img = renderDecode(file: file, viewport: viewport)
-        renderKey = (url: file.url, viewport: viewport)
-        renderCache = img
+        let b = binned(file: file, viewport: viewport)
+        let img = Rasterizer.makeImage(Gain.apply(b, viewport.gain), palette: viewport.palette)
+        imageCache[file.url] = (viewport: viewport, image: img)
         return img
     }
 
-    /// 实际解码 + 分箱 + 增益 + 栅格化。纵向缩放：sampleSpan>0 时只解码该采样窗，
+    /// 解码 + 分箱（不含增益/栅格化），按几何键缓存。纵向缩放：sampleSpan>0 时只解码该采样窗，
     /// 并按窗高分箱；sampleSpan==0 维持旧行为（全采样、h=800）。
-    private func renderDecode(file: SegyFile, viewport: Viewport) -> CGImage? {
-        let n = file.geometry.nTraces
-        let ns = file.geometry.ns
-        let span = min(max(1, viewport.traceSpan), n)
-        let lo = min(max(0, viewport.firstTrace), max(0, n - span))
-        let sampleRange: Range<Int>?
-        let decodedNs: Int
-        let h: Int
-        if viewport.sampleSpan > 0 {
-            let ss = min(viewport.sampleSpan, ns)
-            let firstSample = min(max(0, viewport.firstSample), max(0, ns - ss))
-            sampleRange = firstSample..<(firstSample + ss)
-            decodedNs = ss
-            h = ss
-        } else {
-            sampleRange = nil
-            decodedNs = ns
-            h = 800
+    private func binned(file: SegyFile, viewport: Viewport) -> Binned {
+        let key = GeomKey(viewport)
+        if let hit = binnedCache[file.url], hit.key == key {
+            return hit.binned
         }
+        // 越界钳制全在 Viewport.decodePlan 里（纯函数、有测试覆盖）。
+        let plan = viewport.decodePlan(nTraces: file.geometry.nTraces, ns: file.geometry.ns)
         let r = TraceReader(file: file, maxThreads: 8)
-        let data = r.readDecoded(traceRange: lo..<(lo + span), sampleRange: sampleRange)
-        let b = Decimator.minMax(data, ns: decodedNs, nTraces: span, h: h)
-        let g = Gain.apply(b, viewport.gain)
-        return Rasterizer.makeImage(g, palette: viewport.palette)
+        let data = r.readDecoded(traceRange: plan.traceRange, sampleRange: plan.sampleRange)
+        let b = Decimator.minMax(data, ns: plan.decodedNs,
+                                 nTraces: plan.traceRange.count, h: plan.binHeight)
+        binnedCache[file.url] = (key: key, binned: b)
+        return b
     }
 
     // MARK: - 炮导航
@@ -201,7 +301,7 @@ final class DocumentModel: ObservableObject {
         let shot = shots[i]
         viewport.firstTrace = shot.firstTrace
         // 大炮（单炮可达 ~21000 道）绝不整炮解码：traceSpan 夹到屏宽上限。
-        viewport.traceSpan = min(shot.count, Self.maxTraceSpan)
+        viewport.traceSpan = min(shot.count, Viewport.maxTraceSpan)
         selectTrace(shot.firstTrace)
     }
 

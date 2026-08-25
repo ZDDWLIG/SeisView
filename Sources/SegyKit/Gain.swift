@@ -7,6 +7,25 @@ public enum GainMode: Sendable, Equatable, Hashable {
     case maxAbs                      // clip[0.5,99.5] + max_abs 训练口径
 }
 
+/// GainMode 去掉载荷后的「种类」。工具栏 Picker 绑定它而不是 GainMode 本身：
+/// GainMode 的载荷可调（百分位随滑块变、AGC 窗宽可变），一旦载荷偏离硬编码的
+/// tag，Picker 的 selection 就匹配不上任何选项、控件会显示空白。
+public enum GainKind: Sendable, Equatable, Hashable, CaseIterable {
+    case percentiles, agc, perTrace, maxAbs
+}
+
+extension GainMode {
+    /// 去掉载荷的种类，供 Picker 之类只关心「哪一种」的地方使用。
+    public var kind: GainKind {
+        switch self {
+        case .percentiles: return .percentiles
+        case .agc:         return .agc
+        case .perTrace:    return .perTrace
+        case .maxAbs:      return .maxAbs
+        }
+    }
+}
+
 public enum Gain {
     /// O(n) 直方图近似百分位：在 [min,max] 上开 4096 桶，累加计数到 pct 分位所在桶。
     /// 返回该桶下界（原 nearest-rank 语义，误差 ≤ 1 桶宽），对增益裁剪足够。
