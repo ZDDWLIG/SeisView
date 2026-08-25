@@ -19,10 +19,12 @@ enum CompareMode: Hashable {
 }
 
 /// App 自身产生的、非 SegyKit 的错误。携带 key 与参数，渲染推迟到视图层，
-/// 这样切语言时已显示的报错也会跟着变。
+/// 这样切语言时已显示的报错也会跟着变。nested 保存底层错误，渲染时再按当前语言翻译，
+/// 避免把 SegyError 的英文描述提前拼进 args。
 struct AppError: Error {
     let key: S
     let args: [String]
+    var nested: Error? = nil
 }
 
 @MainActor
@@ -114,7 +116,7 @@ final class DocumentModel: ObservableObject {
             imageCache.removeAll(); binnedCache.removeAll()
             buildShots()
         } catch let e {
-            error = AppError(key: .errOpenFailed, args: [url.lastPathComponent, String(describing: e)])
+            error = AppError(key: .errOpenFailed, args: [url.lastPathComponent], nested: e)
         }
     }
 

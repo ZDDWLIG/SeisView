@@ -21,6 +21,9 @@ final class L10n: ObservableObject {
         lang = l
         UserDefaults.standard.set(l.rawValue, forKey: Self.defaultsKey)
         MainMenuLocalizer.apply(l)
+        // macOS 14+ 的 SwiftUI 会在 @Published 变化后重建命令菜单，把 applyLanguageCheckmarks
+        // 同步设的勾选态冲掉。让出一轮再刷一次，两种时序下勾选态都能站住。
+        DispatchQueue.main.async { MainMenuLocalizer.apply(l) }
     }
 
     /// 视图里写作 l10n(.menuFileOpen)。
@@ -30,9 +33,16 @@ final class L10n: ObservableObject {
     func f(_ k: S, _ args: [String]) -> String { format(k, lang, args) }
 }
 
-/// 把任意错误渲染成当前语言的文案。AppError 走自带 key，其余交给 Localization.userMessage。
+/// 把任意错误渲染成当前语言的文案。AppError 走自带 key，nested 底层错误在渲染时
+/// 追加到 args 末尾；其余交给 Localization.userMessage。
 @MainActor
 func errorMessage(_ e: Error, _ l10n: L10n) -> String {
-    if let a = e as? AppError { return l10n.f(a.key, a.args) }
+    if let a = e as? AppError {
+        var args = a.args
+        if let nested = a.nested {
+            args.append(userMessage(for: nested, l10n.lang))
+        }
+        return l10n.f(a.key, args)
+    }
     return userMessage(for: e, l10n.lang)
 }
