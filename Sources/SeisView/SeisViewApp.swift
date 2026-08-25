@@ -53,7 +53,15 @@ struct SeisViewApp: App {
                 Button(l10n(.menuNavNextShot)) { model.goToNextShot() }
                     .keyboardShortcut(.rightArrow, modifiers: .command)
             }
+            CommandGroup(replacing: .help) {
+                HelpMenuButton(title: l10n(.menuHelpUsage))
+            }
         }
+
+        Window(l10n(.helpWindowTitle), id: "help") {
+            HelpView(l10n: l10n)
+        }
+        .defaultSize(width: 760, height: 560)
     }
 }
 
