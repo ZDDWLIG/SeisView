@@ -745,6 +745,10 @@ func runAll() {
     }
     h.check(Set(zhTitles).count == zhTitles.count, "菜单中文标题无重复（反查不撞车）")
     h.check(Set(enTitles).count == enTitles.count, "菜单英文标题无重复（反查不撞车）")
+    // 跨语言也不得撞车：menuKey 同时比对两张表（zhTable[k] == title || enTable[k] == title），
+    // 若 zh 的某值恰好等于 en 的某值，同一标题会命中两个 key、返回结果不确定
+    let crossDup = Set(zhTitles).intersection(Set(enTitles)).sorted()
+    h.check(crossDup.isEmpty, "菜单跨语言文案无重叠（撞车：\(crossDup.joined(separator: ", "))）")
 
     h.finish()
 }
