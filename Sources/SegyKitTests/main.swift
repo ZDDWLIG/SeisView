@@ -727,6 +727,25 @@ func runAll() {
     h.check(!String(describing: SegyError.fileTooSmall).contains("文件"),
             "SegyError.description 已改为中性英文")
 
+    // MARK: - 本地化：菜单标题反查
+    h.check(retitledMenuTitle(current: "视图", to: .en) == "View", "视图 → View")
+    h.check(retitledMenuTitle(current: "View", to: .zh) == "视图", "View → 视图")
+    h.check(retitledMenuTitle(current: "退出 SeisView", to: .en) == "Quit SeisView", "退出 → Quit")
+    h.check(retitledMenuTitle(current: "Quit SeisView", to: .zh) == "退出 SeisView", "Quit → 退出")
+    h.check(retitledMenuTitle(current: "上一炮", to: .en) == "Previous Shot", "上一炮 → Previous Shot")
+    // 同语言重复调用是幂等的（切两次同一语言不应错乱）
+    h.check(retitledMenuTitle(current: "View", to: .en) == "View", "同语言反查幂等")
+    // 认不出的标题必须返回 nil，绝不能瞎改系统菜单里我们不认识的项
+    h.check(retitledMenuTitle(current: "Some Third-Party Item", to: .zh) == nil, "未知标题不动")
+    h.check(retitledMenuTitle(current: "", to: .zh) == nil, "空标题不动")
+    // 反查子集内部两语文案不得重复，否则反查会撞车
+    var zhTitles: [String] = [], enTitles: [String] = []
+    for k in menuTitleKeys {
+        zhTitles.append(string(k, .zh)); enTitles.append(string(k, .en))
+    }
+    h.check(Set(zhTitles).count == zhTitles.count, "菜单中文标题无重复（反查不撞车）")
+    h.check(Set(enTitles).count == enTitles.count, "菜单英文标题无重复（反查不撞车）")
+
     h.finish()
 }
 runAll()
