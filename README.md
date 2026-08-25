@@ -33,25 +33,25 @@ Opening a 9.5 GB, 589,248-trace file renders immediately — no full-file scan, 
 
 ## Features
 
-- Variable-density section display (grayscale + seismic blue-white-red palettes)
+- Variable-density section display (grayscale, blue-white-red, red-white-black, brown-white-black palettes)
 - Horizontal panning, vertical zoom, gain control (percentile / AGC / per-trace / max-amplitude)
 - Trace header inspector (FFID, trace sequence, CDP, offset, sample count, etc., with byte positions)
 - Shot-based navigation by FFID
-- Multi-file comparison: side-by-side and overlay (e.g. before/after denoising, input + mask)
+- Multi-file comparison, side by side (e.g. before/after denoising, input + mask)
 - Automatic correction of files that declare IBM float but actually store IEEE
 
 ## Usage
 
-- Two-finger scroll to pan, pinch to zoom, drag to pan
+- Two-finger scroll to pan, pinch to zoom
 - `⌘←` / `⌘→` — previous / next shot
-- Enter a trace number or FFID in the jump box to navigate directly
+- Use the horizontal scroll bar to jump to any position in the trace range
 - Click any trace to inspect its full 240-byte header in the sidebar
 
 ## Why It's Fast
 
 The speed does not come from computing quickly — it comes from **reading almost nothing**:
 
-- **O(1) random access** — SEG-Y's fixed-length record layout means the byte offset of trace *i* is computed directly. Opening a 10 GB file reads only the 3600-byte header; the trace count is derived from the file size. No full-file scan.
+- **O(1) random access** — SEG-Y's fixed-length record layout means the byte offset of trace *i* is computed directly. Opening a 10 GB file reads only a small slice of the header region plus a tiny format-check probe; the trace count is derived from the file size. No full-file scan.
 - **Only viewport traces are read** — a 1200 px wide window reads at most 1200 traces, regardless of how many the file contains.
 - **Parallel `pread`** — each worker thread holds its own file descriptor. `pread` is stateless and inherently thread-safe, which is why 8 threads scale near-linearly.
 - **Zooming is delegated to the system** — an 8-bit indexed bitmap plus a palette LUT; zoom goes through texture sampling rather than recomputing data.
@@ -67,7 +67,7 @@ Measured on Apple M5 / 16 GB with a 9.57 GB file (589,248 traces, ns=4000, IBM f
 
 Decoding accounts for under 2% of the time — the bottleneck is entirely I/O. That is why no file pre-conversion and no GPU decoding are needed.
 
-Shot indexing is optimized separately: naively scanning 589,248 trace headers takes about 57 seconds. Using strided sampling plus binary search for shot boundaries cuts the number of reads by roughly 30×, finishing in under a second with 8 threads. Results are cached to disk keyed by path + size + mtime.
+Shot indexing is optimized separately: naively scanning 589,248 trace headers takes about 57 seconds. Using strided sampling plus binary search for shot boundaries cuts the number of reads by roughly 30×, finishing in under a second with 8 threads. The index is rebuilt whenever a file is opened.
 
 **Vertical min/max binning is a correctness requirement, not an optimization** — compressing 4000 samples into 800 px by point-sampling would alias badly and severely distort the section's appearance.
 
@@ -76,10 +76,9 @@ Shot indexing is optimized separately: naively scanning 589,248 trace headers ta
 The key difference from SeiSee: **malformed files produce a clear error, never a silently wrong image.**
 
 - **Variable-length traces** — validated by exact divisibility of the file size plus sampled consistency checks. The fixed-length-trace flag is often left unmaintained by writers, so it is treated as corroboration only, not truth. On mismatch the file is rejected rather than displayed incorrectly.
-- **IBM declared, IEEE stored** — a batch of samples is decoded both ways and the resulting distributions compared for plausibility. The sane interpretation is chosen automatically and flagged as "format auto-corrected" in the status bar.
+- **IBM declared, IEEE stored** — a batch of samples is decoded both ways and the resulting distributions compared for plausibility. When IEEE is clearly more plausible, the file is decoded as IEEE automatically and the correction is exposed as a flag on the opened file.
 - **Extended textual headers** — the first-trace offset is adjusted per bytes 3505–3506.
 - **Little-endian variants** — if the format code is out of range, little-endian parsing is attempted.
-- **Manual override** — ns, format code, and byte order can all be forced explicitly.
 
 Supported data sample format codes: 1 (4-byte IBM float), 2 (4-byte integer), 3 (2-byte integer), 5 (4-byte IEEE float), 8 (1-byte integer).
 
@@ -91,20 +90,28 @@ Supported data sample format codes: 1 (4-byte IBM float), 2 (4-byte integer), 3 
 SegyKit (pure core, independently testable)
 ├── SegyFile      file opening, header parsing, geometry inference and validation
 ├── TraceReader   parallel pread + sample decoding
-├── ShotIndex     FFID shot index construction and on-disk caching
+├── ShotIndex     FFID shot index construction
 ├── Decimator     LOD downsampling (min/max binning)
 └── Rasterizer    amplitude → 8-bit index → palette LUT → CGImage
+
+Localization (bilingual strings — pure, shared by app and tests)
+├── Lang          system-language detection + user override
+├── StringKey     S key enum for every UI string
+├── Tables        zh/en string tables with formatting
+├── ErrorText     SegyError → localized user text
+├── MenuTitles    menu-title reverse lookup
+└── HelpContent   nine-chapter bilingual user guide
 
 SeisView.app (AppKit + SwiftUI)
 ├── DocumentModel   open file set + viewport state
 ├── SectionView     section rendering
 ├── HeaderInspector trace header table
-└── CompareLayout   side-by-side / overlay
+└── CompareLayout   side-by-side comparison
 ```
 
 ## Building from Source
 
-Requires macOS 13+ and Swift 6.0+. Command Line Tools are sufficient — **a full Xcode installation is not needed**. Shaders are compiled at runtime, costing only a few tens of milliseconds at startup.
+Requires macOS 13+ and Swift 6.0+. Command Line Tools are sufficient — **a full Xcode installation is not needed**.
 
 ```bash
 swift run SeisView           # build and run directly
@@ -145,6 +152,8 @@ swift scripts/make_icon.swift && iconutil -c icns Resources/SeisView.iconset -o 
 
 - No wiggle-trace display (variable density only)
 - Shot indexing may miss boundaries in files where a single shot has fewer than 256 traces
+- No overlay comparison — the multi-file view is side-by-side only
+- No manual override of sample count, format code, or byte order
 - No spectral analysis, image export, or data write-back (read-only viewer)
 - No 3D volume display or slice browsing
 - macOS only — no Windows or Linux port

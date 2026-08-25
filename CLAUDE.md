@@ -53,6 +53,9 @@ SeisView（AppKit + SwiftUI）
 ├── SectionView.swift   剖面显示（NSViewRepresentable + 双向滚轮平移/捏合/点击选道/右键框选缩放/光标）
 ├── ScrollBar.swift     自绘水平/垂直滚动条 + ScrolledSection 包裹布局
 ├── HeaderInspector.swift 道头表格（字节位置 + 值）
+├── L10n.swift           语言状态（UserDefaults 持久化）+ errorMessage 渲染
+├── MainMenuLocalizer.swift 遍历 NSApp.mainMenu 重命名（系统项按 selector、其余按标题反查）
+├── HelpWindow.swift     双语使用说明窗口（HelpView + HelpMenuButton，⌘?）
 └── CompareLayout.swift  多文件并排（HSplitView 可拖动分隔）
 
 SegyKitTests（自定义 harness 可执行目标，非 XCTest）
