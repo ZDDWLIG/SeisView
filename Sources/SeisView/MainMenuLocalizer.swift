@@ -85,7 +85,9 @@ enum MainMenuLocalizer {
                 item.title = t
             }
             // 「服务」子菜单由系统填充，只改它自己的标题。
-            if item.submenu === NSApp.servicesMenu {
+            // servicesMenu 是可选：先解包再比，避免 item.submenu 与 servicesMenu 同 nil 时
+            // `===` 对两个 nil 返回 true，把每个叶子项都误判成「服务」。
+            if let services = NSApp.servicesMenu, item.submenu === services {
                 item.title = string(.sysServices, lang)
                 continue
             }
