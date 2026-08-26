@@ -1,5 +1,6 @@
 import SwiftUI
 import AppKit
+import SegyKit
 
 /// 包裹自绘 NSImageView 的 SwiftUI 桥：把滚轮/捏合/光标事件转发到 DocumentModel。
 struct SectionView: NSViewRepresentable {
@@ -41,6 +42,16 @@ struct SectionView: NSViewRepresentable {
         v.imageWidth = image?.width ?? 0
         v.totalTraces = totalTraces
         v.zoomRectMode = zoomRectMode
+        v.traceResolver = { [weak model] pos in
+            // 事件回调（AppKit）不被视为 @MainActor，读 DocumentModel 状态需显式放回主 actor。
+            MainActor.assumeIsolated {
+                guard let model else { return pos }
+                if model.viewport.traceOrder == .byOffset, let idx = model.offsetIndex {
+                    return OffsetIndexLookup.traceAt(idx, position: pos) ?? pos
+                }
+                return pos
+            }
+        }
         v.refreshCursorIfInside()   // 平移后光标下的绝对道号已变化，就地重算
     }
 }
@@ -63,6 +74,8 @@ final class SectionNSView: NSImageView {
     var totalTraces: Int = 0
     /// 局部放大模式：为 true 时双指点击（右键）拖动框选矩形，而不是左键选道。
     var zoomRectMode = false
+    /// 排序模式下把「位置」反查成真实道号（nil = 道号模式）。
+    var traceResolver: ((Int) -> Int)?
 
     private var pendingScrollX: CGFloat = 0   // 累积横向滚动增量（道号方向）
     private var pendingScrollY: CGFloat = 0   // 累积纵向滚动增量（采样方向）
@@ -104,7 +117,7 @@ final class SectionNSView: NSImageView {
     override func mouseDown(with event: NSEvent) {
         // 左键单击：选中光标下的绝对道号（局部放大模式下左键不做框选）。
         if let t = trace(at: convert(event.locationInWindow, from: nil)) {
-            onSelect?(t)
+            onSelect?(resolvedTrace(t))
         }
     }
 
@@ -176,7 +189,7 @@ final class SectionNSView: NSImageView {
     }
 
     private func reportCursor(at windowPoint: NSPoint) {
-        onCursor?(trace(at: convert(windowPoint, from: nil)))
+        onCursor?(trace(at: convert(windowPoint, from: nil)).map(resolvedTrace))
     }
 
     /// 视图坐标 → 绝对道号（夹到 [0, totalTraces-1]）；视图/图像宽度非法时返回 nil。
@@ -185,5 +198,10 @@ final class SectionNSView: NSImageView {
         let frac = max(0, min(1, pt.x / bounds.width))
         let raw = firstTrace + Int(frac * CGFloat(imageWidth))
         return min(max(0, raw), max(0, totalTraces - 1))
+    }
+
+    /// 把「位置」解析为上报用的真实道号：byOffset 模式下经 traceResolver 反查，否则原样。
+    private func resolvedTrace(_ position: Int) -> Int {
+        traceResolver?(position) ?? position
     }
 }
