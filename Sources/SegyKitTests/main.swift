@@ -788,6 +788,46 @@ func runAll() {
     }
     h.check(keysIdentical, "快捷键表两语按键写法相同、说明都非空")
 
+    // MARK: - 按偏移距排列
+
+    do {
+        // 局部作用域：外层 runAll 已声明过 shots / src 同名局部变量，这里包一层避免重声明。
+        /// 假道头源：按 trace 序号返回预先设定的 offset，供 OffsetIndexBuilder 测试。
+        final class FakeHeaderSource: TraceHeaderSource {
+            let offsets: [Int]
+            init(_ o: [Int]) { self.offsets = o }
+            func readTraceHeaders(range: Range<Int>) -> [TraceHeader] {
+                range.map { i in
+                    TraceHeader(ffid: 0, traceSeq: i, cdp: 0,
+                                offset: offsets[i], ns: 0, dtMicros: 0)
+                }
+            }
+        }
+
+        // 两炮：炮1 = 道 0..3（offset 300,100,100,200），炮2 = 道 3..6（offset -50, 10, -50）
+        // 炮1 内 offset 升序（并列按道号稳定）→ 道号顺序 [1,2,0,3]
+        // 炮2 内 offset 升序 → 道号顺序 [3,5,4]（道3 的 offset 200 属炮1，炮2 从道3 起）
+        // 注意：下面构造 shots 时 firstTrace/count 必须与 offsets 长度一致。
+        let shots = [Shot(ffid: 1, firstTrace: 0, count: 3),
+                     Shot(ffid: 2, firstTrace: 3, count: 3)]
+        let src = FakeHeaderSource([300, 100, 100, -50, 10, -50])
+        let idx = OffsetIndexBuilder.build(shots: shots, source: src)
+        h.check(idx.perm == [1, 2, 0, 3, 5, 4], "炮内 offset 升序 + 并列按道号稳定")
+        h.check(idx.shotStarts == [0, 3, 6], "每炮起始位置")
+
+        h.check(OffsetIndexLookup.traceAt(idx, position: 0) == 1, "traceAt 首")
+        h.check(OffsetIndexLookup.traceAt(idx, position: 5) == 4, "traceAt 末")
+        h.check(OffsetIndexLookup.traceAt(idx, position: -1) == nil, "traceAt 越界下")
+        h.check(OffsetIndexLookup.traceAt(idx, position: 6) == nil, "traceAt 越界上")
+
+        h.check(OffsetIndexLookup.traces(idx, positions: 0..<3) == [1, 2, 0], "traces 区间")
+        h.check(OffsetIndexLookup.traces(idx, positions: 0..<0).isEmpty, "traces 空区间")
+
+        h.check(OffsetIndexLookup.positionRange(idx, shotIndex: 0) == 0..<3, "positionRange 炮1")
+        h.check(OffsetIndexLookup.positionRange(idx, shotIndex: 1) == 3..<6, "positionRange 炮2")
+        h.check(OffsetIndexLookup.positionRange(idx, shotIndex: 2) == nil, "positionRange 越界")
+    }
+
     h.finish()
 }
 runAll()
