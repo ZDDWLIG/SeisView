@@ -66,6 +66,44 @@ public final class TraceReader {
         return out
     }
 
+    /// 不连续道号读取（排序模式专用）：道号不连续，逐道 pread 解码。
+    /// sampleRange == nil 时整道读；否则只读该采样窗。
+    public func readDecoded(traceIndices: [Int], sampleRange: Range<Int>?) -> [Float] {
+        let n = traceIndices.count
+        let lo = sampleRange?.lowerBound ?? 0
+        let hi = sampleRange?.upperBound ?? file.geometry.ns
+        let span = hi - lo
+        var out = [Float](repeating: 0, count: n * span)
+        guard n > 0 else { return out }
+        let maxT = maxThreads
+        let path = file.url.path
+        let format = file.geometry.format
+        let order = file.geometry.byteOrder
+        let bps = format.bytesPerSample
+        let step = file.geometry.traceBytes
+        let head = Int(file.geometry.firstTraceOffset)
+        out.withUnsafeMutableBufferPointer { obp in
+            let buf = BufferRef(obp)
+            DispatchQueue.concurrentPerform(iterations: maxT) { t in
+                let loI = n * t / maxT, hiI = n * (t + 1) / maxT
+                if loI >= hiI { return }
+                let fd = open(path, O_RDONLY)
+                defer { close(fd) }
+                let rawBytes = span * bps
+                var raw = [UInt8](repeating: 0, count: rawBytes)
+                for i in loI..<hiI {
+                    let off = off_t(head + traceIndices[i] * step + 240 + lo * bps)
+                    raw.withUnsafeMutableBytes { _ = pread(fd, $0.baseAddress, rawBytes, off) }
+                    raw.withUnsafeBytes { rb in
+                        Decoder.decode(bytes: rb.baseAddress!, count: span, format: format,
+                                       order: order, into: buf.base + i * span)
+                    }
+                }
+            }
+        }
+        return out
+    }
+
     public func readTraceHeaders(range: Range<Int>) -> [TraceHeader] {
         let n = range.count
         var out = [TraceHeader](repeating: TraceHeader(ffid: 0, traceSeq: 0, cdp: 0, offset: 0, ns: 0, dtMicros: 0), count: n)
@@ -102,3 +140,6 @@ private struct BufferRef<Element>: @unchecked Sendable {
         self.base = bp.baseAddress!
     }
 }
+
+/// TraceReader 天生能按区间读道头，满足 OffsetIndexBuilder 需要的 TraceHeaderSource。
+extension TraceReader: TraceHeaderSource {}
