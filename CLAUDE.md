@@ -1,6 +1,6 @@
 # SeisView — 开发与维护手册
 
-macOS 原生 SEG-Y / SGY 地震数据查看器，对标 Windows 的 SeiSee，核心是超大文件（10 GB 级、数十万道）的**即时显示**。纯 Swift，零第三方依赖。界面支持中文（简体）与 English，首次启动跟随系统语言，可在 View → Language 切换（即时生效、持久记忆），并内置双语使用说明（⌘?）。
+macOS 原生 SEG-Y / SGY 地震数据查看器，对标 Windows 的 SeiSee，核心是超大文件（10 GB 级、数十万道）的**即时显示**。纯 Swift，零第三方依赖。界面支持中文（简体）与 English，首次启动跟随系统语言，可在 View → Language 切换（即时生效、持久记忆），并内置双语使用说明（⌘?）。剖面横向排列支持三种：按道号 / 按偏移距（有符号）/ 按偏移距（绝对值）。
 
 ---
 
@@ -27,7 +27,7 @@ macOS 原生 SEG-Y / SGY 地震数据查看器，对标 Windows 的 SeiSee，核
 ```
 SegyKit（纯核心，零 UI 依赖，可独立测试）
 ├── Types.swift        SampleFormat / ByteOrder / Geometry / BinaryHeader / TraceHeader
-├── ByteOrder.swift    ByteOrderReader.u16/u32（大/小端读取）
+├── ByteOrder.swift    ByteOrderReader.u16/u32/i32（大/小端读取）
 ├── IBM.swift          IBM→IEEE 解码（指数查找表）
 ├── Decoder.swift      按 SampleFormat 解码原始字节 → [Float]
 ├── SegyFile.swift     打开、头解析、几何推断与校验、假 IBM 自动校正
@@ -38,8 +38,8 @@ SegyKit（纯核心，零 UI 依赖，可独立测试）
 ├── Viewport.swift     纯值类型视口状态 + 平移/缩放/重置/百分比换算 + decodePlan + 中心锚缩放 + 缩放映射 + maxTraceSpan 上限
 ├── ScrollMetrics.swift 滚动条滑块几何（长度/偏移/像素↔索引反算）
 ├── ShotIndex.swift    FFID 炮索引（抽样 + 二分）
-├── TraceOrder.swift  剖面排列方式（byTrace / byOffset）
-└── OffsetIndex.swift 炮内 offset 排序置换 + 每炮起始位置
+├── TraceOrder.swift  剖面排列方式（byTrace / byOffset / byOffsetAbs）
+└── OffsetIndex.swift 炮内 offset 排序置换（有符号/绝对值两套 perm）+ 每炮起始位置
 
 Localization（纯文案库，依赖 SegyKit，被 SeisView 与 SegyKitTests 共用）
 ├── Lang.swift         语言状态（系统检测 + 用户覆盖）
@@ -103,9 +103,11 @@ swift scripts/make_icon.swift && iconutil -c icns Resources/SeisView.iconset -o 
 | 定长道标志 | 3503–3504 | raw[302..303] |
 | 扩展文本头数 | 3505–3506 | raw[304..305] |
 
-道头（`p` 指向 240 字节道头起始）：道序 = u32(p+0)、FFID = u32(p+8)、CDP = u32(p+20)、偏移距 = u32(p+36)、ns = u16(p+114)、dt = u16(p+116)。
+道头（`p` 指向 240 字节道头起始）：道序 = u32(p+0)、FFID = u32(p+8)、CDP = u32(p+20)、偏移距 = **i32**(p+36)（有符号）、ns = u16(p+114)、dt = u16(p+116)。
 
 > 坑：`raw[300..305]` 曾错写成 `raw[100..105]`（3501−3201=300 算成 100），导致扩展头文件几何错乱。这是最容易再犯的错误。
+
+> 坑：偏移距（offset，字节 37–40）是**有符号 int32**。若用 u32 读，炮点一侧的负 offset 会变成 ~42 亿，排序时排到炮内最后、剖面呈「先升后跳」的假反转。这是 0.3.0 修过的真实 bug，别改回 u32。
 
 ### IBM 浮点解码
 
@@ -161,6 +163,9 @@ swift scripts/make_icon.swift && iconutil -c icns Resources/SeisView.iconset -o 
 - 道/时间缩放滑块是**相对缩放 + 松手回中**：左拖放大、右拖缩小，效果保留、把手回中点；跨 `sampleSpan==0`（全采样）与窗口化时用连续乘算避免跳变
 - 缩放滑块在**正文顶部 `ZoomBar`**（不在工具栏，避免两个 Slider 被并进同一工具栏槽）；**拖动期间只动把手、不触发渲染，松手才应用一次缩放**——否则拖动时每个 tick 都改 viewport → 整段重解码，卡死主线程
 - 无频谱、图片导出、数据写回
+- offset 排序模式下道不再物理连续，整道大块读失效、退化为逐道读，比道号模式慢（尤其向左滚）
+- 对比模式下「排列」选择禁用（offset 索引只按 `files.first` 建，避免各 pane 串用偏移量）
+- offset 索引无进度提示：打开文件后后台读全部道头，大文件需数秒，构建完成前 offset 选项禁用
 - 未 Apple 公证（免费路，ad-hoc 签名；接收方首次右键→打开）
 
 ---
@@ -202,3 +207,7 @@ swift scripts/make_icon.swift && iconutil -c icns Resources/SeisView.iconset -o 
 11. 配色收敛为 4 种 LUT：灰度 / 红白蓝 / 红白黑 / 棕白黑（删去旧「地震/自定义」名）。
 12. 局部放大用右键（双指点击）框选；`zoomRectMode` 作为 `SectionView` 值参数传入，松手 `zoomToRect` 放大并退出。
 13. 触控板滚动改双向平移（横向→道号、纵向→采样），方向按用户习惯反号。
+14. 偏移距字段按有符号 i32 读（炮点一侧负 offset 是正常值，无符号读会变 42 亿）。
+15. 三种剖面排列：道号 / offset 有符号 / offset 绝对值，排序键分别为 `(trace)`、`(offset, trace)`、`(|offset|, offset, trace)`；索引一次读道头产出两套 perm（炮边界共享）。
+16. offset 排序整道大块读失效退化为逐道读；对比模式禁用 offset 排序（单索引无法覆盖多文件）。
+17. 双语界面（中/英）+ 内置双语 Help（⌘?）：菜单栏本地化走 AppKit 遍历 `NSApp.mainMenu` 而非 SwiftUI `.commands`。
