@@ -828,6 +828,17 @@ func runAll() {
         h.check(OffsetIndexLookup.positionRange(idx, shotIndex: 2) == nil, "positionRange 越界")
     }
 
+    // 负 offset 的有符号解析：SEG-Y offset（道头字节 37–40）是有符号 int32，
+    // 炮点一侧为负。若按无符号 u32 读，-2000 会变成 42 亿量级，排序时排到炮内最后。
+    do {
+        var tr = [UInt8](repeating: 0, count: 240)
+        tr[36] = 0xFF; tr[37] = 0xFF; tr[38] = 0xF8; tr[39] = 0x30   // int32 -2000 大端
+        tr.withUnsafeBytes { rb in
+            let th = SegyFile.parseTraceHeader(rb.baseAddress!, order: .big)
+            h.check(th.offset == -2000, "offset 有符号解析：读出 -2000 而非无符号巨大值")
+        }
+    }
+
     h.finish()
 }
 runAll()

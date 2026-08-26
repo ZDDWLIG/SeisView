@@ -48,7 +48,7 @@ public final class SegyFile {
         let ffid = Int(ByteOrderReader.u32(p + 8, order))
         let seq = Int(ByteOrderReader.u32(p + 0, order))
         let cdp = Int(ByteOrderReader.u32(p + 20, order))
-        let off = Int(ByteOrderReader.u32(p + 36, order))
+        let off = Int(ByteOrderReader.i32(p + 36, order))
         let ns = Int(ByteOrderReader.u16(p + 114, order))
         let dt = Int(ByteOrderReader.u16(p + 116, order))
         return TraceHeader(ffid: ffid, traceSeq: seq, cdp: cdp, offset: off, ns: ns, dtMicros: dt)
