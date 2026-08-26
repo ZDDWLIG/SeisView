@@ -154,6 +154,15 @@ struct ContentView: View {
                     Text(l10n(.paletteBrownWhiteBlack)).tag(Palette.brownWhiteBlack)
                 }
                 .help(l10n(.tbPalette))
+                Picker(l10n(.tbOrder), selection: Binding(
+                    get: { model.viewport.traceOrder },
+                    set: { model.setTraceOrder($0) }
+                )) {
+                    Text(l10n(.orderByTrace)).tag(TraceOrder.byTrace)
+                    Text(l10n(.orderByOffset)).tag(TraceOrder.byOffset)
+                }
+                .help(l10n(.tbOrder))
+                .disabled(model.file == nil || !model.offsetIndexReady)
                 Toggle(isOn: Binding(
                     get: { model.showHeaderInspector },
                     set: { model.showHeaderInspector = $0 }
@@ -312,7 +321,11 @@ struct StatusBar: View {
         let sSpan = vp.sampleSpan > 0 ? min(vp.sampleSpan, ns) : ns
         let sLast = min(vp.firstSample + sSpan, ns)
         HStack(spacing: 16) {
-            Text(l10n.f(.statusTraces, ["\(first + 1)", "\(last + 1)", "\(nTraces)"]))
+            if model.viewport.traceOrder == .byOffset {
+                Text(l10n.f(.statusPositions, ["\(first + 1)", "\(last + 1)", "\(nTraces)"]))
+            } else {
+                Text(l10n.f(.statusTraces, ["\(first + 1)", "\(last + 1)", "\(nTraces)"]))
+            }
             Text(l10n.f(.statusSamples, ["\(vp.firstSample + 1)", "\(sLast)", "\(ns)"]))
             Text(l10n.f(.statusTraceSpan, ["\(vp.traceSpan)"]))
             Text(l10n.f(.statusCursor, [cursor.trace.map(String.init) ?? l10n(.statusCursorNone)]))

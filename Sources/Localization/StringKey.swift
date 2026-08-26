@@ -20,6 +20,7 @@ public enum S: String, CaseIterable, Sendable {
     case tbGain, gainPercentiles, gainAGC, gainPerTrace, gainMaxAbs, tbGainHelp
     case tbClipHelp
     case tbPalette, paletteGray, paletteRedWhiteBlue, paletteRedWhiteBlack, paletteBrownWhiteBlack
+    case tbOrder, orderByTrace, orderByOffset
     case tbHeaderToggle, tbHeaderToggleHelp
     case tbZoomRect, tbZoomRectHelp
     case tbAlign, tbAlignHelp
@@ -30,7 +31,7 @@ public enum S: String, CaseIterable, Sendable {
     case zoomTraceAxis, zoomTraceAxisHelp, zoomTimeAxis, zoomTimeAxisHelp
 
     // 状态栏（含占位符）
-    case statusTraces, statusSamples, statusTraceSpan, statusCursor
+    case statusTraces, statusPositions, statusSamples, statusTraceSpan, statusCursor
     case statusShotCount, statusShotCurrent, statusShotBuilding, statusCursorNone
 
     // 空态
