@@ -812,16 +812,19 @@ func runAll() {
                      Shot(ffid: 2, firstTrace: 3, count: 3)]
         let src = FakeHeaderSource([300, 100, 100, -50, 10, -50])
         let idx = OffsetIndexBuilder.build(shots: shots, source: src)
-        h.check(idx.perm == [1, 2, 0, 3, 5, 4], "炮内 offset 升序 + 并列按道号稳定")
+        h.check(idx.permSigned == [1, 2, 0, 3, 5, 4], "有符号：炮内 offset 升序 + 并列按道号稳定")
+        h.check(idx.permAbs == [1, 2, 0, 4, 3, 5], "绝对值：炮内 |offset| 升序 + 并列负在前")
         h.check(idx.shotStarts == [0, 3, 6], "每炮起始位置")
 
-        h.check(OffsetIndexLookup.traceAt(idx, position: 0) == 1, "traceAt 首")
-        h.check(OffsetIndexLookup.traceAt(idx, position: 5) == 4, "traceAt 末")
-        h.check(OffsetIndexLookup.traceAt(idx, position: -1) == nil, "traceAt 越界下")
-        h.check(OffsetIndexLookup.traceAt(idx, position: 6) == nil, "traceAt 越界上")
+        h.check(OffsetIndexLookup.traceAt(idx, position: 0, order: .byOffset) == 1, "traceAt 首（有符号）")
+        h.check(OffsetIndexLookup.traceAt(idx, position: 3, order: .byOffsetAbs) == 4, "traceAt（绝对值）")
+        h.check(OffsetIndexLookup.traceAt(idx, position: 5, order: .byOffset) == 4, "traceAt 末（有符号）")
+        h.check(OffsetIndexLookup.traceAt(idx, position: -1, order: .byOffset) == nil, "traceAt 越界下")
+        h.check(OffsetIndexLookup.traceAt(idx, position: 6, order: .byOffset) == nil, "traceAt 越界上")
 
-        h.check(OffsetIndexLookup.traces(idx, positions: 0..<3) == [1, 2, 0], "traces 区间")
-        h.check(OffsetIndexLookup.traces(idx, positions: 0..<0).isEmpty, "traces 空区间")
+        h.check(OffsetIndexLookup.traces(idx, positions: 0..<3, order: .byOffset) == [1, 2, 0], "traces 区间（有符号）")
+        h.check(OffsetIndexLookup.traces(idx, positions: 3..<6, order: .byOffsetAbs) == [4, 3, 5], "traces 区间（绝对值）")
+        h.check(OffsetIndexLookup.traces(idx, positions: 0..<0, order: .byOffset).isEmpty, "traces 空区间")
 
         h.check(OffsetIndexLookup.positionRange(idx, shotIndex: 0) == 0..<3, "positionRange 炮1")
         h.check(OffsetIndexLookup.positionRange(idx, shotIndex: 1) == 3..<6, "positionRange 炮2")

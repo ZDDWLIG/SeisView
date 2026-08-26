@@ -160,6 +160,7 @@ struct ContentView: View {
                 )) {
                     Text(l10n(.orderByTrace)).tag(TraceOrder.byTrace)
                     Text(l10n(.orderByOffset)).tag(TraceOrder.byOffset)
+                    Text(l10n(.orderByOffsetAbs)).tag(TraceOrder.byOffsetAbs)
                 }
                 .help(l10n(.tbOrder))
                 .disabled(model.file == nil || !model.offsetIndexReady || model.compareMode != .single)
@@ -321,7 +322,7 @@ struct StatusBar: View {
         let sSpan = vp.sampleSpan > 0 ? min(vp.sampleSpan, ns) : ns
         let sLast = min(vp.firstSample + sSpan, ns)
         HStack(spacing: 16) {
-            if model.viewport.traceOrder == .byOffset {
+            if model.viewport.traceOrder != .byTrace {
                 Text(l10n.f(.statusPositions, ["\(first + 1)", "\(last + 1)", "\(nTraces)"]))
             } else {
                 Text(l10n.f(.statusTraces, ["\(first + 1)", "\(last + 1)", "\(nTraces)"]))

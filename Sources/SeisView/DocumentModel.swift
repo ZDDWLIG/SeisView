@@ -269,9 +269,9 @@ final class DocumentModel: ObservableObject {
         let plan = viewport.decodePlan(nTraces: file.geometry.nTraces, ns: file.geometry.ns)
         let r = TraceReader(file: file, maxThreads: 8)
         let data: [Float]
-        if viewport.traceOrder == .byOffset, let idx = offsetIndex {
+        if viewport.traceOrder != .byTrace, let idx = offsetIndex {
             let positions = plan.traceRange
-            let indices = OffsetIndexLookup.traces(idx, positions: positions)
+            let indices = OffsetIndexLookup.traces(idx, positions: positions, order: viewport.traceOrder)
             data = r.readDecoded(traceIndices: indices, sampleRange: plan.sampleRange)
         } else {
             data = r.readDecoded(traceRange: plan.traceRange, sampleRange: plan.sampleRange)
@@ -365,11 +365,11 @@ final class DocumentModel: ObservableObject {
         guard shots.indices.contains(i) else { return }
         currentShotIndex = i
         let shot = shots[i]
-        if viewport.traceOrder == .byOffset, let idx = offsetIndex,
+        if viewport.traceOrder != .byTrace, let idx = offsetIndex,
            let r = OffsetIndexLookup.positionRange(idx, shotIndex: i) {
             viewport.firstTrace = r.lowerBound
             viewport.traceSpan = min(r.count, Viewport.maxTraceSpan)
-            let real = OffsetIndexLookup.traceAt(idx, position: r.lowerBound) ?? 0
+            let real = OffsetIndexLookup.traceAt(idx, position: r.lowerBound, order: viewport.traceOrder) ?? 0
             selectTrace(real)
         } else {
             viewport.firstTrace = shot.firstTrace

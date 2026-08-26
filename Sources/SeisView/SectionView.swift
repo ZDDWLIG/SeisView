@@ -46,8 +46,8 @@ struct SectionView: NSViewRepresentable {
             // 事件回调（AppKit）不被视为 @MainActor，读 DocumentModel 状态需显式放回主 actor。
             MainActor.assumeIsolated {
                 guard let model else { return pos }
-                if model.viewport.traceOrder == .byOffset, let idx = model.offsetIndex {
-                    return OffsetIndexLookup.traceAt(idx, position: pos) ?? pos
+                if model.viewport.traceOrder != .byTrace, let idx = model.offsetIndex {
+                    return OffsetIndexLookup.traceAt(idx, position: pos, order: model.viewport.traceOrder) ?? pos
                 }
                 return pos
             }
