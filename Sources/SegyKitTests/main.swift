@@ -804,9 +804,9 @@ func runAll() {
             }
         }
 
-        // 两炮：炮1 = 道 0..3（offset 300,100,100,200），炮2 = 道 3..6（offset -50, 10, -50）
-        // 炮1 内 offset 升序（并列按道号稳定）→ 道号顺序 [1,2,0,3]
-        // 炮2 内 offset 升序 → 道号顺序 [3,5,4]（道3 的 offset 200 属炮1，炮2 从道3 起）
+        // 两炮：炮1 = 道 0..<3（offset 300,100,100），炮2 = 道 3..<6（offset -50, 10, -50）
+        // 炮1 内 offset 升序（并列按道号稳定）→ 道号顺序 [1,2,0]
+        // 炮2 内 offset 升序 → 道号顺序 [3,5,4]（道3 的 offset -50 属炮2）
         // 注意：下面构造 shots 时 firstTrace/count 必须与 offsets 长度一致。
         let shots = [Shot(ffid: 1, firstTrace: 0, count: 3),
                      Shot(ffid: 2, firstTrace: 3, count: 3)]
