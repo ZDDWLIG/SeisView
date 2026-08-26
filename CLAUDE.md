@@ -43,7 +43,7 @@ SegyKit（纯核心，零 UI 依赖，可独立测试）
 
 Localization（纯文案库，依赖 SegyKit，被 SeisView 与 SegyKitTests 共用）
 ├── Lang.swift         语言状态（系统检测 + 用户覆盖）
-├── StringKey.swift    S 枚举（91 个界面文案 key）
+├── StringKey.swift    S 枚举（92 个界面文案 key）
 ├── Tables.swift       zh/en 两张文案表 + string/format
 ├── ErrorText.swift    SegyError → 本地化用户文案
 ├── MenuTitles.swift   菜单标题中英反查（纯函数）
@@ -74,7 +74,7 @@ SegyKitTests（自定义 harness 可执行目标，非 XCTest）
 ```bash
 swift build                       # 构建 4 个 target（SegyKit / Localization / SegyKitTests / SeisView）
 swift run SeisView                # 直接运行
-swift run SegyKitTests            # 跑测试（当前 218 断言，非零退出码 = 失败）
+swift run SegyKitTests            # 跑测试（当前 222 断言，非零退出码 = 失败）
 
 ./scripts/make_app.sh             # 快速打当前架构的 .app
 ./scripts/release.sh [版本号]      # 通用二进制 + dmg + zip（产出在 dist/）
