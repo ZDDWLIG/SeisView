@@ -168,6 +168,7 @@ final class DocumentModel: ObservableObject {
 
     /// 局部放大：把框选矩形（归一化坐标 x/y ∈ [0,1]，原点在左下）换算成新的视口窗口。
     /// x → 道号范围，y → 采样号范围（y=1 是图像顶部、采样号最小处）。一次性，放大后退出模式。
+    /// 排序模式（byOffset）下，这里换算的是「位置」区间，渲染时再映射回真实道号。
     func zoomToRect(normalized r: CGRect) {
         guard let f = file, r.width > 0.001, r.height > 0.001 else {
             zoomRectMode = false

@@ -37,7 +37,9 @@ SegyKit（纯核心，零 UI 依赖，可独立测试）
 ├── Rasterizer.swift   振幅 → CGImage（灰度/红白蓝/红白黑/棕白黑 4 配色，256×3 LUT）
 ├── Viewport.swift     纯值类型视口状态 + 平移/缩放/重置/百分比换算 + decodePlan + 中心锚缩放 + 缩放映射 + maxTraceSpan 上限
 ├── ScrollMetrics.swift 滚动条滑块几何（长度/偏移/像素↔索引反算）
-└── ShotIndex.swift    FFID 炮索引（抽样 + 二分）
+├── ShotIndex.swift    FFID 炮索引（抽样 + 二分）
+├── TraceOrder.swift  剖面排列方式（byTrace / byOffset）
+└── OffsetIndex.swift 炮内 offset 排序置换 + 每炮起始位置
 
 Localization（纯文案库，依赖 SegyKit，被 SeisView 与 SegyKitTests 共用）
 ├── Lang.swift         语言状态（系统检测 + 用户覆盖）

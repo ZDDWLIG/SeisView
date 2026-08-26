@@ -152,6 +152,7 @@ swift scripts/make_icon.swift && iconutil -c icns Resources/SeisView.iconset -o 
 
 - No wiggle-trace display (variable density only)
 - Shot indexing may miss boundaries in files where a single shot has fewer than 256 traces
+- Offset-sorted display (byOffset) reorders traces within each shot, so the large contiguous read is lost and it renders slower than the default trace order
 - No overlay comparison — the multi-file view is side-by-side only
 - No manual override of sample count, format code, or byte order
 - No spectral analysis, image export, or data write-back (read-only viewer)
