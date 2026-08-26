@@ -42,6 +42,9 @@ final class DocumentModel: ObservableObject {
     @Published var shotsReady = false
     /// 当前所在炮在 `shots` 中的下标。
     @Published var currentShotIndex = 0
+    /// 按偏移距排列用的全文件置换（nil = 未建好）。
+    @Published var offsetIndex: OffsetIndex?
+    @Published var offsetIndexReady = false
     /// 点击剖面选中的绝对道号（HeaderInspector 依据它显示道头）。
     @Published var selectedTrace = 0
     /// 选中道的道头（由 selectTrace 读取，避免在视图 body 里做磁盘 IO）。
@@ -60,11 +63,14 @@ final class DocumentModel: ObservableObject {
     private var binnedCache: [URL: (key: GeomKey, binned: Binned)] = [:]
 
     /// 决定解码结果的那部分视口状态。增益/调色板不在其中——它们只影响之后的着色。
+    /// traceOrder 必须纳入：不同排列产生不同几何，漏掉会复用旧排列的分箱结果 → 图像错乱。
     private struct GeomKey: Equatable {
         let firstTrace: Int, traceSpan: Int, firstSample: Int, sampleSpan: Int
+        let traceOrder: TraceOrder
         init(_ v: Viewport) {
             firstTrace = v.firstTrace; traceSpan = v.traceSpan
             firstSample = v.firstSample; sampleSpan = v.sampleSpan
+            traceOrder = v.traceOrder
         }
     }
 
@@ -261,7 +267,14 @@ final class DocumentModel: ObservableObject {
         // 越界钳制全在 Viewport.decodePlan 里（纯函数、有测试覆盖）。
         let plan = viewport.decodePlan(nTraces: file.geometry.nTraces, ns: file.geometry.ns)
         let r = TraceReader(file: file, maxThreads: 8)
-        let data = r.readDecoded(traceRange: plan.traceRange, sampleRange: plan.sampleRange)
+        let data: [Float]
+        if viewport.traceOrder == .byOffset, let idx = offsetIndex {
+            let positions = plan.traceRange
+            let indices = OffsetIndexLookup.traces(idx, positions: positions)
+            data = r.readDecoded(traceIndices: indices, sampleRange: plan.sampleRange)
+        } else {
+            data = r.readDecoded(traceRange: plan.traceRange, sampleRange: plan.sampleRange)
+        }
         let b = Decimator.minMax(data, ns: plan.decodedNs,
                                  nTraces: plan.traceRange.count, h: plan.binHeight)
         binnedCache[file.url] = (key: key, binned: b)
@@ -301,19 +314,65 @@ final class DocumentModel: ObservableObject {
             if !built.isEmpty && !built.indices.contains(currentShotIndex) {
                 currentShotIndex = 0
             }
+            buildOffsetIndex()
         case .failure:
             shots = []
+            offsetIndex = nil
+            offsetIndexReady = true   // 建不出炮索引，offset 索引也无法建；选项保持禁用
         }
+    }
+
+    /// 构建 offset 索引：后台读所有道头、炮内 offset 排序。仿 buildShots，url 比对丢过期结果。
+    func buildOffsetIndex() {
+        guard let f = file else { return }
+        let url = f.url
+        let builtShots = shots
+        offsetIndex = nil
+        offsetIndexReady = false
+        Task.detached(priority: .userInitiated) { [weak self] in
+            let result = Result {
+                let reopened = try SegyFile.open(url: url)
+                let reader = TraceReader(file: reopened)
+                return OffsetIndexBuilder.build(shots: builtShots, source: reader)
+            }
+            await MainActor.run {
+                guard let self, self.file?.url == url else { return }
+                self.offsetIndex = (try? result.get())
+                self.offsetIndexReady = true
+            }
+        }
+    }
+
+    /// 切换排列方式。整体重赋值 viewport（铁律）、清两级缓存、firstTrace 归零。
+    /// 显示参数（增益/调色板/百分比）保留。
+    func setTraceOrder(_ o: TraceOrder) {
+        guard let f = file else { return }
+        var v = viewport
+        v.traceOrder = o
+        viewport = v
+        imageCache.removeAll(); binnedCache.removeAll()
+        var v2 = viewport
+        v2.firstTrace = 0
+        viewport = v2
+        _ = f  // 保持与其它 setter 形态一致；无额外逻辑
     }
 
     func goToShot(_ i: Int) {
         guard shots.indices.contains(i) else { return }
         currentShotIndex = i
         let shot = shots[i]
-        viewport.firstTrace = shot.firstTrace
-        // 大炮（单炮可达 ~21000 道）绝不整炮解码：traceSpan 夹到屏宽上限。
-        viewport.traceSpan = min(shot.count, Viewport.maxTraceSpan)
-        selectTrace(shot.firstTrace)
+        if viewport.traceOrder == .byOffset, let idx = offsetIndex,
+           let r = OffsetIndexLookup.positionRange(idx, shotIndex: i) {
+            viewport.firstTrace = r.lowerBound
+            viewport.traceSpan = min(r.count, Viewport.maxTraceSpan)
+            let real = OffsetIndexLookup.traceAt(idx, position: r.lowerBound) ?? 0
+            selectTrace(real)
+        } else {
+            viewport.firstTrace = shot.firstTrace
+            // 大炮（单炮可达 ~21000 道）绝不整炮解码：traceSpan 夹到屏宽上限。
+            viewport.traceSpan = min(shot.count, Viewport.maxTraceSpan)
+            selectTrace(shot.firstTrace)
+        }
     }
 
     func goToPreviousShot() { goToShot(currentShotIndex - 1) }
