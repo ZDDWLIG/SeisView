@@ -319,7 +319,7 @@ final class DocumentModel: ObservableObject {
         case .failure:
             shots = []
             offsetIndex = nil
-            offsetIndexReady = true   // 建不出炮索引，offset 索引也无法建；选项保持禁用
+            offsetIndexReady = false   // 建不出炮索引，offset 索引也无法建；选项保持禁用
         }
     }
 
@@ -345,7 +345,8 @@ final class DocumentModel: ObservableObject {
     }
 
     /// 切换排列方式。整体重赋值 viewport（铁律）、清两级缓存、firstTrace 归零。
-    /// 显示参数（增益/调色板/百分比）保留。
+    /// 显示参数（增益/调色板/百分比）保留。对齐 resetView：currentShotIndex 与光标归零，
+    /// 否则状态栏还显示旧炮而画面已回到第一炮/位置 0，自相矛盾。
     func setTraceOrder(_ o: TraceOrder) {
         guard let f = file else { return }
         var v = viewport
@@ -355,6 +356,8 @@ final class DocumentModel: ObservableObject {
         var v2 = viewport
         v2.firstTrace = 0
         viewport = v2
+        currentShotIndex = 0
+        cursor.setTrace(nil)
         _ = f  // 保持与其它 setter 形态一致；无额外逻辑
     }
 

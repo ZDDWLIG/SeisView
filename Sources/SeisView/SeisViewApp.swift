@@ -162,7 +162,7 @@ struct ContentView: View {
                     Text(l10n(.orderByOffset)).tag(TraceOrder.byOffset)
                 }
                 .help(l10n(.tbOrder))
-                .disabled(model.file == nil || !model.offsetIndexReady)
+                .disabled(model.file == nil || !model.offsetIndexReady || model.compareMode != .single)
                 Toggle(isOn: Binding(
                     get: { model.showHeaderInspector },
                     set: { model.showHeaderInspector = $0 }
