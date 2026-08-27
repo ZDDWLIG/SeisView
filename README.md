@@ -2,6 +2,8 @@
 
 A native macOS viewer for SEG-Y / SGY seismic data, built for **instant display of very large files** (10 GB+, hundreds of thousands of traces). Written in pure Swift with zero third-party dependencies. Inspired by SeiSee on Windows.
 
+> **Windows version:** a native Windows port with the same behavior is available at [ZDDWLIG/SeisView-Win](https://github.com/ZDDWLIG/SeisView-Win) (Rust + egui).
+
 Opening a 9.5 GB, 589,248-trace file renders immediately — no full-file scan, no pre-conversion.
 
 ## Installation
@@ -157,7 +159,7 @@ swift scripts/make_icon.swift && iconutil -c icns Resources/SeisView.iconset -o 
 - No manual override of sample count, format code, or byte order
 - No spectral analysis, image export, or data write-back (read-only viewer)
 - No 3D volume display or slice browsing
-- macOS only — no Windows or Linux port
+- Linux is not supported — for Windows, use the [SeisView-Win](https://github.com/ZDDWLIG/SeisView-Win) port
 
 ## License
 
