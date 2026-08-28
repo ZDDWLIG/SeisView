@@ -101,6 +101,8 @@ final class DocumentModel: ObservableObject {
             velocityMode = false
             velocityAnchor = nil
             velocityLine = nil
+            spectrumLocalMode = false
+            spectrumResult = nil
             singleTrace = nil
             error = nil
             imageCache.removeAll(); binnedCache.removeAll()
@@ -135,6 +137,8 @@ final class DocumentModel: ObservableObject {
             velocityMode = false
             velocityAnchor = nil
             velocityLine = nil
+            spectrumLocalMode = false
+            spectrumResult = nil
             singleTrace = nil
             error = nil
             imageCache.removeAll(); binnedCache.removeAll()
@@ -227,6 +231,8 @@ final class DocumentModel: ObservableObject {
         velocityMode = false
         velocityAnchor = nil
         velocityLine = nil
+        spectrumLocalMode = false
+        spectrumResult = nil
     }
 
     /// 水平滚动条：直接定位到某道（绝对位置）。
@@ -285,7 +291,7 @@ final class DocumentModel: ObservableObject {
     }
 
     /// wiggle 渲染：跳过 min/max 分箱，直接拿解码样本画波形变面积。
-    /// 宽 = 道数（traceRange.count），高 = decodePlan.binHeight（全采样 800 / 窗口化 = sampleSpan）。
+    /// 宽 = 道数 × 4（每道 4px，让单道波形有横向分辨率），高 = decodePlan.binHeight（全采样 800 / 窗口化 = sampleSpan）。
     private func renderWiggle(file: SegyFile, viewport: Viewport) -> CGImage? {
         let plan = viewport.decodePlan(nTraces: file.geometry.nTraces, ns: file.geometry.ns)
         let r = TraceReader(file: file, maxThreads: 8)
@@ -297,7 +303,7 @@ final class DocumentModel: ObservableObject {
             data = r.readDecoded(traceRange: plan.traceRange, sampleRange: plan.sampleRange)
         }
         return WiggleRenderer.makeImage(data, ns: plan.decodedNs, nTraces: plan.traceRange.count,
-                                        width: plan.traceRange.count, height: plan.binHeight)
+                                        width: plan.traceRange.count * 4, height: plan.binHeight)
     }
 
     /// 解码 + 分箱（不含增益/栅格化），按几何键缓存。纵向缩放：sampleSpan>0 时只解码该采样窗，

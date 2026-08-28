@@ -20,7 +20,7 @@ public enum WiggleRenderer {
         let colW = CGFloat(max(1, width / nTraces))
         let stride = max(1, ns / height)
         let n = (ns + stride - 1) / stride
-        let ampScale = CGFloat(max(1, colW / 2 - 1))
+        let ampScale = max(CGFloat(1), CGFloat(colW) / 2)
 
         for t in 0..<min(nTraces, width) {
             let base = t * ns

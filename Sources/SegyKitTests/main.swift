@@ -817,6 +817,23 @@ func runAll() {
         h.check(peak == 8, "FFT 正弦峰值落在 bin 8 (got \(peak))")
         h.checkClose(spec.frequencies[8], f0, 1e-3, "FFT 峰值频率 = f0")
 
+        // 非 2 的幂输入：m=1000 → 零填充 N=1024（真实道 ns=4000→4096 同路径）
+        let m = 1000
+        let N = 1024
+        let dfP = 1.0 / (Double(N) * Double(dtUs) / 1e6)
+        let f0P = 10 * dfP
+        var sigP = [Float](repeating: 0, count: m)
+        for k in 0..<m {
+            let t = Double(k) * Double(dtUs) / 1e6
+            sigP[k] = Float(sin(2 * .pi * f0P * t))
+        }
+        let specP = FFT.amplitudeSpectrum(sigP, dtMicros: dtUs)
+        h.check(specP.amplitudes.count == N / 2 + 1, "FFT 非2幂零填充谱长 N/2+1")
+        h.checkClose(specP.frequencies.last!, 250, 1e-3, "FFT 非2幂 Nyquist")
+        var peakP = 0
+        for i in 1..<specP.amplitudes.count where specP.amplitudes[i] > specP.amplitudes[peakP] { peakP = i }
+        h.check(peakP == 10, "FFT 非2幂峰值 bin 10 (got \(peakP))")
+
         // 直流序列 → DC 为峰值（Hann 窗主瓣会把能量泄漏到相邻 bin，但 DC 仍显著最大）
         let dc = FFT.amplitudeSpectrum([Float](repeating: 1, count: n), dtMicros: dtUs)
         var dcNonZero = 0

@@ -53,7 +53,7 @@ struct SectionView: NSViewRepresentable {
         v.image = image.map { NSImage(cgImage: $0, size: NSSize(width: $0.width, height: $0.height)) }
         v.imageScaling = .scaleAxesIndependently
         v.firstTrace = model.viewport.firstTrace
-        v.imageWidth = image?.width ?? 0
+        v.imageWidth = min(model.viewport.traceSpan, totalTraces)
         v.totalTraces = totalTraces
         v.zoomRectMode = zoomRectMode
         v.spectrumLocalMode = spectrumLocalMode
