@@ -1,6 +1,6 @@
 # SeisView — 开发与维护手册
 
-macOS 原生 SEG-Y / SGY 地震数据查看器，对标 Windows 的 SeiSee，核心是超大文件（10 GB 级、数十万道）的**即时显示**。纯 Swift，零第三方依赖。界面支持中文（简体）与 English，首次启动跟随系统语言，可在 View → Language 切换（即时生效、持久记忆），并内置双语使用说明（⌘?）。剖面横向排列支持三种：按道号 / 按偏移距（有符号）/ 按偏移距（绝对值）。
+macOS 原生 SEG-Y / SGY 地震数据查看器，对标 Windows 的 SeiSee，核心是超大文件（10 GB 级、数十万道）的**即时显示**。纯 Swift，零第三方依赖。界面支持中文（简体）与 English，首次启动跟随系统语言，可在 View → Language 切换（即时生效、持久记忆），并内置双语使用说明（⌘?）。剖面横向排列支持三种：按道号 / 按偏移距（有符号）/ 按偏移距（绝对值）。内置四项分析功能：默认最大幅值（maxAbs）归一化、视速度测算（两点连亮绿线显示 v）、wiggle 波形变面积 + 单道放大波形、振幅谱（分贝谱，局部框选 / 全局）。
 
 ---
 
@@ -39,11 +39,14 @@ SegyKit（纯核心，零 UI 依赖，可独立测试）
 ├── ScrollMetrics.swift 滚动条滑块几何（长度/偏移/像素↔索引反算）
 ├── ShotIndex.swift    FFID 炮索引（抽样 + 二分）
 ├── TraceOrder.swift  剖面排列方式（byTrace / byOffset / byOffsetAbs）
-└── OffsetIndex.swift 炮内 offset 排序置换（有符号/绝对值两套 perm）+ 每炮起始位置
+├── OffsetIndex.swift 炮内 offset 排序置换（有符号/绝对值两套 perm）+ 每炮起始位置
+├── FFT.swift            radix-2 FFT + 单边振幅谱（Hann 窗 + 零填充到 2 的幂）
+├── Velocity.swift       视速度纯计算（|Δoffset| / (|Δsample|·dt) → m/s，Δt/Δx 为零返回 nil）
+└── WiggleRenderer.swift 波形变面积渲染（原始采样 → CGImage，每道 maxAbs 归一化，黑白）
 
 Localization（纯文案库，依赖 SegyKit，被 SeisView 与 SegyKitTests 共用）
 ├── Lang.swift         语言状态（系统检测 + 用户覆盖）
-├── StringKey.swift    S 枚举（92 个界面文案 key）
+├── StringKey.swift    S 枚举（114 个界面文案 key）
 ├── Tables.swift       zh/en 两张文案表 + string/format
 ├── ErrorText.swift    SegyError → 本地化用户文案
 ├── MenuTitles.swift   菜单标题中英反查（纯函数）
@@ -58,7 +61,12 @@ SeisView（AppKit + SwiftUI）
 ├── L10n.swift           语言状态（UserDefaults 持久化）+ errorMessage 渲染
 ├── MainMenuLocalizer.swift 遍历 NSApp.mainMenu 重命名（系统项按 selector、其余按标题反查）
 ├── HelpWindow.swift     双语使用说明窗口（HelpView + HelpMenuButton，⌘?）
-└── CompareLayout.swift  多文件并排（HSplitView 可拖动分隔）
+├── CompareLayout.swift  多文件并排（HSplitView 可拖动分隔）
+├── AnalysisTypes.swift  视速度/单道/频谱的值类型（VelocityAnchor/VelocityLine、SingleTraceData、SpectrumResult）
+├── PlotView.swift       自绘坐标图（AppKit NSView：曲线 + 坐标轴 + 刻度数值）
+├── PlotAxes.swift       轴刻度纯函数（niceTicks / compactNum）
+├── SingleTraceView.swift 单道放大波形弹窗（sheet，横轴时间/纵轴振幅）
+└── SpectrumView.swift   振幅谱弹窗（sheet，分贝谱 + x/y 轴范围）
 
 SegyKitTests（自定义 harness 可执行目标，非 XCTest）
 ├── Harness.swift      @MainActor 断言工具（check/checkClose/checkRel/finish）
@@ -74,7 +82,7 @@ SegyKitTests（自定义 harness 可执行目标，非 XCTest）
 ```bash
 swift build                       # 构建 4 个 target（SegyKit / Localization / SegyKitTests / SeisView）
 swift run SeisView                # 直接运行
-swift run SegyKitTests            # 跑测试（当前 222 断言，非零退出码 = 失败）
+swift run SegyKitTests            # 跑测试（当前 249 断言，非零退出码 = 失败）
 
 ./scripts/make_app.sh             # 快速打当前架构的 .app
 ./scripts/release.sh [版本号]      # 通用二进制 + dmg + zip（产出在 dist/）
@@ -131,6 +139,15 @@ swift scripts/make_icon.swift && iconutil -c icns Resources/SeisView.iconset -o 
 
 ---
 
+## 分析功能技术事实（视速度 / wiggle / 单道 / 振幅谱）
+
+- **FFT**：radix-2 Cooley–Tukey，Hann 窗（基于原始长度 m）后零填充到 2 的幂，单边振幅 |X|，频率轴 f[k] = k/(N·dt)、Nyquist = 1/(2dt)。真实道 ns=4000 → N=4096 走零填充分支（有测试）。
+- **视速度**：v = |Δoffset| / (|Δsample|·dt)。offset 用道头**有符号 int32**（字节 37–40）；单位继承 offset 字段（通常 m/s）。Δsample=0 或 Δoffset=0 返回 nil（不画线）。
+- **wiggle 渲染**：图像宽**必须 == 道数**（每道 1px），**不要加宽**。加宽（width>nTraces）会让 NSImageView 按图像固有尺寸显示，剖面被横向拉伸、可见道变少——0.4.0 修过的真 bug。每道独立 maxAbs 归一化，ampScale = max(1, colW/2−1)（满幅度 = 一整道宽，稠密无缝）。
+- **振幅谱合成**：先叠（选中道取平均）后 FFT；全局/大区间**均匀抽 ≤400 道**（`SpectrumBuilder.sampledIndices`）。分贝谱 dB = 20·log10(amp/maxAmp)（峰值 0 dB），默认 x 范围 0–100 Hz。频谱计算在 `Task.detached` 里 reopen 文件 + url 比对（同 `buildShots`，`computeSpectrum`）。
+
+---
+
 ## Swift 6 严格并发 / 测试约定
 
 - **本机只有 Command Line Tools，无 XCTest / Swift Testing**，测试用自定义 `SegyKitTests` 可执行目标。勿 `import XCTest`/`import Testing`。
@@ -154,7 +171,7 @@ swift scripts/make_icon.swift && iconutil -c icns Resources/SeisView.iconset -o 
 
 ## 已知限制 / 未做（保持诚实，README 别写过头）
 
-- 无 Wiggle 波形显示（仅变密度）
+- Wiggle 只有黑色变面积（无点划、填充方向、配色等高级选项）
 - ShotIndex 无 spec 里的「多炮区间退化为线性全扫」回退——单炮 < 256 道的文件会漏边界（目标数据单炮 ~2 万道，安全）
 - 触控板滚动：横向→道号平移、纵向→采样平移（方向符号已按用户习惯反转）；采样平移仅纵向缩放（`sampleSpan>0`）后可用，全采样铺满时纵向无可滚余量
 - 垂直滚动条只在纵向缩放后（`sampleSpan>0`）可用；默认全采样铺满时无可滚余量，呈禁用态
@@ -162,7 +179,12 @@ swift scripts/make_icon.swift && iconutil -c icns Resources/SeisView.iconset -o 
 - 对比 = 单文件打开后，「对比…」**单选追加**一个文件、并排显示（**无叠加模式**，`CompareMode` 只有 `.single`/`.sideBySide`）；所有 pane 共享 viewport，滚动/缩放/对齐天然联动；并排 pane 用 `HSplitView`（分隔条可拖动调整宽度）
 - 道/时间缩放滑块是**相对缩放 + 松手回中**：左拖放大、右拖缩小，效果保留、把手回中点；跨 `sampleSpan==0`（全采样）与窗口化时用连续乘算避免跳变
 - 缩放滑块在**正文顶部 `ZoomBar`**（不在工具栏，避免两个 Slider 被并进同一工具栏槽）；**拖动期间只动把手、不触发渲染，松手才应用一次缩放**——否则拖动时每个 tick 都改 viewport → 整段重解码，卡死主线程
-- 无频谱、图片导出、数据写回
+- 无图片导出、数据写回（振幅谱已有）
+- 振幅谱合成是全文件**均匀抽 ≤400 道平均**，非全量逐道；分贝谱默认 y 范围 −120~0 dB
+- 视速度单位直接继承道头 offset 字段（通常 m/s），不换算米/英尺
+- wiggle 仅在放大到少数道时波形才清晰（1200 道铺满时每道 <1px，波形不可辨）
+- 坐标图文字用 AppKit 自绘（`PlotNSView`），字号固定、不可缩放/选择
+- 对比模式下视速度/单道/振幅谱作用于 `files.first`（与道头检查器口径一致）
 - offset 排序模式下道不再物理连续，整道大块读失效、退化为逐道读，比道号模式慢（尤其向左滚）
 - 对比模式下「排列」选择禁用（offset 索引只按 `files.first` 建，避免各 pane 串用偏移量）
 - offset 索引无进度提示：打开文件后后台读全部道头，大文件需数秒，构建完成前 offset 选项禁用
@@ -187,6 +209,11 @@ swift scripts/make_icon.swift && iconutil -c icns Resources/SeisView.iconset -o 
 - **新增任何用户可见文案必须先在 `S` 枚举里加 case，再补齐 `zhTable`/`enTable` 两张表**。漏一边会被 `SegyKitTests` 的完整性断言当场抓住；带占位符的文案两语 `%@` 个数必须相同，否则状态栏参数错位。
 - **菜单栏本地化走 AppKit 而非 SwiftUI**：`.commands` 在 macOS 13 上响应 `@Published` 重建菜单并不可靠，改由 `MainMenuLocalizer` 遍历 `NSApp.mainMenu` 重命名。系统项按 `action` selector 认（selector 不随语言变），其余按标题在中英两表里反查；两类都认不出的项一律不动。启动时的那次 `apply` 必须 `DispatchQueue.main.async` 延后一轮，否则菜单栏还没建好。
 - **`DocumentModel.error` 存的是错误值不是字符串**：文案在视图层按当前语言渲染。别图省事改回存成品字符串——那样切语言时已显示的报错不会跟着变。
+- **SwiftUI `Canvas`/`Text` 画文字在 macOS 上不可靠（刻度数字不渲染）**：坐标图文字改用 AppKit 的 `NSAttributedString.draw`（`PlotView.swift` 的 `PlotNSView`）。别再用 `ctx.draw(Text(...))` / `ctx.resolve(Text(...))` 画轴标签。
+- **wiggle 图像宽必须 == 道数**：加宽（width>nTraces）会让 `NSImageView` 按图像固有尺寸显示、剖面被横向拉伸、可见道变少（0.4.0 真 bug，别加 width*N）。
+- **`zoomRectMode` 与 `spectrumLocalMode` 互斥**：进入一个必须清另一个，否则右键框选会串（0.4.0 修过）。
+- **默认增益是 maxAbs**：任何「验证百分位行为」的测试，`Viewport()` 之后必须先 `setGainKind(.percentiles)`，否则断言/图像比较失效（Task 1 踩过）。
+- **提交/发布说明用英文**：commit message、release notes 一律英文；代码注释仍按项目惯例用中文，界面文案 zh/en 双语。
 
 ---
 
@@ -211,3 +238,11 @@ swift scripts/make_icon.swift && iconutil -c icns Resources/SeisView.iconset -o 
 15. 三种剖面排列：道号 / offset 有符号 / offset 绝对值，排序键分别为 `(trace)`、`(offset, trace)`、`(|offset|, offset, trace)`；索引一次读道头产出两套 perm（炮边界共享）。
 16. offset 排序整道大块读失效退化为逐道读；对比模式禁用 offset 排序（单索引无法覆盖多文件）。
 17. 双语界面（中/英）+ 内置双语 Help（⌘?）：菜单栏本地化走 AppKit 遍历 `NSApp.mainMenu` 而非 SwiftUI `.commands`。
+18. 默认归一化改为最大幅值（maxAbs）；`clipPercent` 仍记住 98 供切回百分位时重建载荷。
+19. 视速度：两次点击（剖面位置→真实道号反查 offset）连亮绿线，v=|Δoffset|/(|Δsample|·dt)，标签沿朝上法向偏移避开线。
+20. wiggle 作为调色板第 5 项（`Palette.wiggle`），走独立渲染路径（跳过 `Decimator`/增益，每道 maxAbs）；「单道」按钮弹 sheet 波形。
+21. 振幅谱：手写 radix-2 FFT（Hann 窗 + 零填充），先叠后变换、全文件抽 ≤400 道；分贝谱 `20·log10(amp/maxAmp)`，x 默认 0–100 Hz。
+22. 坐标图文字用 AppKit 自绘（`NSAttributedString.draw`），不用 SwiftUI Canvas 文本（macOS 上不渲染）。
+23. 弹窗（单道/频谱）用 sheet + 右上角圆圈叉关闭、可拉伸；不再用「重置视图」按钮作关闭。
+24. 视速度/频谱/单道的瞬时状态放 `DocumentModel`（非 `Viewport`）；`zoomRectMode` 与 `spectrumLocalMode` 互斥。
+25. 版本 0.4.0；commit message / release notes 一律英文（代码注释仍中文，界面文案 zh/en 双语）。
