@@ -177,7 +177,12 @@ struct ContentView: View {
                 .help(l10n(.tbHeaderToggleHelp))
                 Toggle(isOn: Binding(
                     get: { model.zoomRectMode },
-                    set: { model.zoomRectMode = $0 }
+                    set: { on in
+                        model.zoomRectMode = on
+                        // 至多一个为真：进入局部放大时关闭频谱局部框选，避免 stale 状态
+                        // 让下一次右键拖动静默算频谱而不是什么都不做。
+                        if on { model.spectrumLocalMode = false }
+                    }
                 )) {
                     Label(l10n(.tbZoomRect), systemImage: "rectangle.dashed")
                 }

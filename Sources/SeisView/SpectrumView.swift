@@ -34,7 +34,14 @@ struct SpectrumView: View {
             HStack(spacing: 16) {
                 rangeField(l10n(.spectrumXRange), "\(l10n(.spectrumUnitHz))", $xMin, $xMax)
                 rangeField(l10n(.spectrumYRange), "", $yMin, $yMax)
-                Toggle(l10n(.spectrumNormalize), isOn: $normalized)
+                Toggle(l10n(.spectrumNormalize), isOn: Binding(
+                    get: { normalized },
+                    set: { on in
+                        normalized = on
+                        // 归一化把曲线缩到 [0,1]，y 轴上限必须跟着变，否则曲线挤在底部看不见。
+                        yMax = on ? 1 : maxAmp
+                    }
+                ))
                 Button(l10n(.spectrumAuto)) { resetRanges() }
                 Spacer()
                 Button(l10n(.tbReset)) { dismiss() }
