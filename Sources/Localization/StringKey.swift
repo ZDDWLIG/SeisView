@@ -24,9 +24,13 @@ public enum S: String, CaseIterable, Sendable {
     case tbHeaderToggle, tbHeaderToggleHelp
     case tbZoomRect, tbZoomRectHelp
     case tbVelocity, tbVelocityHelp, velocityLabel
+    case tbSingleTrace, tbSingleTraceHelp
     case tbAlign, tbAlignHelp
     case tbReset, tbResetHelp
     case tbPrevShot, tbPrevShotHelp, tbNextShot, tbNextShotHelp
+
+    // 单道波形弹窗
+    case singleTraceTitle, singleTraceAxisTime, singleTraceAxisAmp
 
     // 缩放条
     case zoomTraceAxis, zoomTraceAxisHelp, zoomTimeAxis, zoomTimeAxisHelp

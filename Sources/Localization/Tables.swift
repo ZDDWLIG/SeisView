@@ -61,6 +61,8 @@ public let zhTable: [S: String] = [
     .tbVelocity: "视速度",
     .tbVelocityHelp: "视速度：点击两点连蓝线并计算视速度（Δoffset/Δt）",
     .velocityLabel: "v=%@ m/s",
+    .tbSingleTrace: "单道",
+    .tbSingleTraceHelp: "单道：查看选中道的放大波形",
     .tbAlign: "对齐",
     .tbAlignHelp: "对齐：所有窗口回到相同道号/采样号起点",
     .tbReset: "重置视图",
@@ -69,6 +71,10 @@ public let zhTable: [S: String] = [
     .tbPrevShotHelp: "上一炮",
     .tbNextShot: "下一炮",
     .tbNextShotHelp: "下一炮",
+
+    .singleTraceTitle: "单道波形",
+    .singleTraceAxisTime: "时间 (ms)",
+    .singleTraceAxisAmp: "振幅",
 
     .zoomTraceAxis: "道方向",
     .zoomTraceAxisHelp: "道方向缩放：左拖=放大，右拖=显示更多道，松手回中",
@@ -167,6 +173,8 @@ public let enTable: [S: String] = [
     .tbVelocity: "Velocity",
     .tbVelocityHelp: "Apparent velocity: click two points to draw a blue line and compute velocity (Δoffset/Δt)",
     .velocityLabel: "v=%@ m/s",
+    .tbSingleTrace: "Single Trace",
+    .tbSingleTraceHelp: "Single trace: view the selected trace's waveform zoomed in",
     .tbAlign: "Align",
     .tbAlignHelp: "Align: return every pane to the same starting trace and sample",
     .tbReset: "Reset View",
@@ -175,6 +183,10 @@ public let enTable: [S: String] = [
     .tbPrevShotHelp: "Previous shot",
     .tbNextShot: "Next Shot",
     .tbNextShotHelp: "Next shot",
+
+    .singleTraceTitle: "Single Trace",
+    .singleTraceAxisTime: "Time (ms)",
+    .singleTraceAxisAmp: "Amplitude",
 
     .zoomTraceAxis: "Trace axis",
     .zoomTraceAxisHelp: "Trace-axis zoom: drag left to zoom in, right to show more traces; the handle re-centres on release",

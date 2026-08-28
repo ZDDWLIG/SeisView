@@ -191,6 +191,11 @@ struct ContentView: View {
                 .toggleStyle(.button)
                 .help(l10n(.tbVelocityHelp))
                 .disabled(model.file == nil)
+                Button { model.showSingleTrace() } label: {
+                    Label(l10n(.tbSingleTrace), systemImage: "waveform.path")
+                }
+                .help(l10n(.tbSingleTraceHelp))
+                .disabled(model.file == nil)
                 if model.compareMode != .single {
                     Button { model.resetView() } label: {
                         Label(l10n(.tbAlign), systemImage: "align.horizontal.center")
@@ -213,6 +218,12 @@ struct ContentView: View {
                 .help(l10n(.tbNextShotHelp))
                 .disabled(model.shots.isEmpty)
             }
+        }
+        .sheet(item: Binding(
+            get: { model.singleTrace },
+            set: { if $0 == nil { model.singleTrace = nil } }
+        )) { data in
+            SingleTraceView(data: data, l10n: l10n)
         }
     }
 }

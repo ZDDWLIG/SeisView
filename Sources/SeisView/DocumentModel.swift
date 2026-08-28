@@ -57,6 +57,8 @@ final class DocumentModel: ObservableObject {
     @Published var velocityMode = false
     @Published var velocityAnchor: VelocityAnchor?
     @Published var velocityLine: VelocityLine?
+    /// 单道波形弹窗的数据（非 nil 时弹出 sheet）。
+    @Published var singleTrace: SingleTraceData?
     let reader: TraceReader? = nil
     let cursor = CursorStore()
     /// 图像缓存：按文件分桶，键为完整 viewport（含 gain/palette）。
@@ -95,6 +97,7 @@ final class DocumentModel: ObservableObject {
             velocityMode = false
             velocityAnchor = nil
             velocityLine = nil
+            singleTrace = nil
             error = nil
             imageCache.removeAll(); binnedCache.removeAll()
             buildShots()
@@ -128,6 +131,7 @@ final class DocumentModel: ObservableObject {
             velocityMode = false
             velocityAnchor = nil
             velocityLine = nil
+            singleTrace = nil
             error = nil
             imageCache.removeAll(); binnedCache.removeAll()
             buildShots()
@@ -404,6 +408,20 @@ final class DocumentModel: ObservableObject {
         let clamped = max(0, min(t, f.geometry.nTraces - 1))
         selectedTrace = clamped
         selectedHeader = readHeader(forTrace: clamped)
+    }
+
+    /// 读取选中道的全部采样，弹出单道波形。
+    func showSingleTrace() {
+        guard let f = file, f.geometry.nTraces > 0 else { return }
+        let t = max(0, min(selectedTrace, f.geometry.nTraces - 1))
+        let samples = TraceReader(file: f, maxThreads: 1)
+            .readDecoded(traceRange: t..<(t + 1), sampleRange: nil)
+        var ffid: Int? = nil
+        if shots.indices.contains(currentShotIndex) {
+            let s = shots[currentShotIndex]
+            if t >= s.firstTrace && t < s.firstTrace + s.count { ffid = s.ffid }
+        }
+        singleTrace = SingleTraceData(trace: t, ffid: ffid, samples: samples, dtMicros: f.geometry.dtMicros)
     }
 
     /// 视速度模式下的一次剖面点击：第一次设锚点，第二次连成线并计算速度。
