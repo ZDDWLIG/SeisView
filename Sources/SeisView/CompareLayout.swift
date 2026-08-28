@@ -24,7 +24,9 @@ struct CompareLayout: View {
             caption(f.url.lastPathComponent)
             SectionView(model: model, cursor: model.cursor,
                         image: model.render(file: f, viewport: model.viewport),
-                        totalTraces: f.geometry.nTraces, zoomRectMode: model.zoomRectMode)
+                        totalTraces: f.geometry.nTraces, totalSamples: f.geometry.ns,
+                        zoomRectMode: model.zoomRectMode,
+                        velocityMode: model.velocityMode, velocityLine: model.velocityLine)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .clipped()
         }

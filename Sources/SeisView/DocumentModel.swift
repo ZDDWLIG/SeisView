@@ -53,6 +53,10 @@ final class DocumentModel: ObservableObject {
     @Published var showHeaderInspector = true
     /// 局部放大模式：为 true 时在剖面上框选矩形、松开后放大到该区域（一次性，放大后自动退出）。
     @Published var zoomRectMode = false
+    /// 视速度测算模式 + 锚点 + 已测量的线。
+    @Published var velocityMode = false
+    @Published var velocityAnchor: VelocityAnchor?
+    @Published var velocityLine: VelocityLine?
     let reader: TraceReader? = nil
     let cursor = CursorStore()
     /// 图像缓存：按文件分桶，键为完整 viewport（含 gain/palette）。
@@ -88,6 +92,9 @@ final class DocumentModel: ObservableObject {
             shotsReady = false
             currentShotIndex = 0
             zoomRectMode = false
+            velocityMode = false
+            velocityAnchor = nil
+            velocityLine = nil
             error = nil
             imageCache.removeAll(); binnedCache.removeAll()
             buildShots()
@@ -118,6 +125,9 @@ final class DocumentModel: ObservableObject {
             shotsReady = false
             currentShotIndex = 0
             zoomRectMode = false
+            velocityMode = false
+            velocityAnchor = nil
+            velocityLine = nil
             error = nil
             imageCache.removeAll(); binnedCache.removeAll()
             buildShots()
@@ -206,6 +216,9 @@ final class DocumentModel: ObservableObject {
         viewport = v
         currentShotIndex = 0
         zoomRectMode = false
+        velocityMode = false
+        velocityAnchor = nil
+        velocityLine = nil
     }
 
     /// 水平滚动条：直接定位到某道（绝对位置）。
@@ -391,6 +404,46 @@ final class DocumentModel: ObservableObject {
         let clamped = max(0, min(t, f.geometry.nTraces - 1))
         selectedTrace = clamped
         selectedHeader = readHeader(forTrace: clamped)
+    }
+
+    /// 视速度模式下的一次剖面点击：第一次设锚点，第二次连成线并计算速度。
+    /// position/sample 由 SectionNSView 上报（position 经 traceResolver 解析前）。
+    func velocityClick(position: Int, sample: Int) {
+        guard let f = file else { return }
+        let n = f.geometry.nTraces
+        let clamped = max(0, min(position, n - 1))
+        let real = realTrace(forPosition: clamped)
+        let off = readHeader(forTrace: real)?.offset ?? 0
+        if let anchor = velocityAnchor {
+            if let mps = Velocity.apparentVelocity(offsetA: anchor.offset, offsetB: off,
+                                                   sampleA: anchor.sample, sampleB: sample,
+                                                   dtMicros: f.geometry.dtMicros) {
+                velocityLine = VelocityLine(start: VelocityPoint(position: anchor.position, sample: anchor.sample),
+                                            end: VelocityPoint(position: clamped, sample: sample),
+                                            mps: mps)
+            } else {
+                velocityLine = nil
+            }
+            velocityAnchor = nil
+        } else {
+            velocityAnchor = VelocityAnchor(position: clamped, sample: sample, offset: off)
+            velocityLine = nil
+        }
+    }
+
+    /// 把剖面位置解析成真实道号（byOffset/byOffsetAbs 经 offsetIndex 反查）。
+    private func realTrace(forPosition p: Int) -> Int {
+        if viewport.traceOrder != .byTrace, let idx = offsetIndex {
+            return OffsetIndexLookup.traceAt(idx, position: p, order: viewport.traceOrder) ?? p
+        }
+        return p
+    }
+
+    /// 退出视速度模式并清除已画的线。
+    func toggleVelocityMode() {
+        velocityMode.toggle()
+        velocityAnchor = nil
+        velocityLine = nil
     }
 
     /// 读取单道道头（240 字节 pread，开销可忽略）。

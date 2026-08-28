@@ -23,6 +23,7 @@ public enum S: String, CaseIterable, Sendable {
     case tbOrder, orderByTrace, orderByOffset, orderByOffsetAbs
     case tbHeaderToggle, tbHeaderToggleHelp
     case tbZoomRect, tbZoomRectHelp
+    case tbVelocity, tbVelocityHelp, velocityLabel
     case tbAlign, tbAlignHelp
     case tbReset, tbResetHelp
     case tbPrevShot, tbPrevShotHelp, tbNextShot, tbNextShotHelp

@@ -9,8 +9,14 @@ struct SectionView: NSViewRepresentable {
     let image: CGImage?
     /// 该 pane 对应文件的总道数（光标坐标换算用）。对比模式下各 pane 可不同。
     let totalTraces: Int
+    /// 该 pane 对应文件的总采样数（velocity y 坐标换算用）。
+    let totalSamples: Int
     /// 局部放大模式。作为值参数传入（而非读 model），保证 SwiftUI 检测到变化并触发 updateNSView。
     let zoomRectMode: Bool
+    /// 视速度测算模式。作为值参数传入（而非读 model），保证 SwiftUI 检测到变化并触发 updateNSView。
+    let velocityMode: Bool
+    /// 已完成的视速度线（蓝线绘制用）。
+    let velocityLine: VelocityLine?
 
     func makeNSView(context: Context) -> SectionNSView {
         let v = SectionNSView()
@@ -32,6 +38,9 @@ struct SectionView: NSViewRepresentable {
         v.onZoomRect = { [weak model] r in
             MainActor.assumeIsolated { model?.zoomToRect(normalized: r) }
         }
+        v.onVelocityClick = { [weak model] pos, sample in
+            MainActor.assumeIsolated { model?.velocityClick(position: pos, sample: sample) }
+        }
         return v
     }
 
@@ -42,6 +51,12 @@ struct SectionView: NSViewRepresentable {
         v.imageWidth = image?.width ?? 0
         v.totalTraces = totalTraces
         v.zoomRectMode = zoomRectMode
+        v.velocityMode = velocityMode
+        v.velocityLine = velocityLine
+        v.firstSample = model.viewport.firstSample
+        v.sampleSpan = model.viewport.sampleSpan
+        v.imageHeight = image?.height ?? 0
+        v.totalSamples = totalSamples
         v.traceResolver = { [weak model] pos in
             // 事件回调（AppKit）不被视为 @MainActor，读 DocumentModel 状态需显式放回主 actor。
             MainActor.assumeIsolated {
@@ -74,6 +89,16 @@ final class SectionNSView: NSImageView {
     var totalTraces: Int = 0
     /// 局部放大模式：为 true 时双指点击（右键）拖动框选矩形，而不是左键选道。
     var zoomRectMode = false
+    /// 视速度测算点击回调：参数为（剖面位置，采样号）。
+    var onVelocityClick: ((Int, Int) -> Void)?
+    /// 视速度测算模式：为 true 时左键两次分别设锚点/连线，不再选道。
+    var velocityMode = false
+    /// 已完成的视速度线（蓝线绘制用）。
+    var velocityLine: VelocityLine?
+    var firstSample = 0
+    var sampleSpan = 0
+    var imageHeight = 0
+    var totalSamples = 0
     /// 排序模式下把「位置」反查成真实道号（nil = 道号模式）。
     var traceResolver: ((Int) -> Int)?
 
@@ -115,7 +140,12 @@ final class SectionNSView: NSImageView {
     }
 
     override func mouseDown(with event: NSEvent) {
-        // 左键单击：选中光标下的绝对道号（局部放大模式下左键不做框选）。
+        if velocityMode {
+            let p = convert(event.locationInWindow, from: nil)
+            guard let t = trace(at: p), let s = sample(at: p) else { return }
+            onVelocityClick?(t, s)
+            return
+        }
         if let t = trace(at: convert(event.locationInWindow, from: nil)) {
             onSelect?(resolvedTrace(t))
         }
@@ -146,12 +176,45 @@ final class SectionNSView: NSImageView {
 
     override func draw(_ dirtyRect: NSRect) {
         super.draw(dirtyRect)
-        guard let start = zoomDragStart, let current = zoomDragCurrent else { return }
-        let r = pixelRect(from: start, to: current)
-        NSColor.controlAccentColor.withAlphaComponent(0.2).setFill()
-        NSBezierPath(rect: r).fill()
-        NSColor.controlAccentColor.setStroke()
-        NSBezierPath(rect: r).stroke()
+        if let start = zoomDragStart, let current = zoomDragCurrent {
+            let r = pixelRect(from: start, to: current)
+            NSColor.controlAccentColor.withAlphaComponent(0.2).setFill()
+            NSBezierPath(rect: r).fill()
+            NSColor.controlAccentColor.setStroke()
+            NSBezierPath(rect: r).stroke()
+        }
+        if let line = velocityLine {
+            drawVelocityLine(line)
+        }
+    }
+
+    private func drawVelocityLine(_ line: VelocityLine) {
+        let p0 = NSPoint(x: x(for: line.start.position), y: y(for: line.start.sample))
+        let p1 = NSPoint(x: x(for: line.end.position), y: y(for: line.end.sample))
+        let path = NSBezierPath()
+        path.move(to: p0); path.line(to: p1)
+        path.lineWidth = 2
+        NSColor.systemBlue.setStroke()
+        path.stroke()
+        let label = String(format: "v=%.0f m/s", line.mps) as NSString
+        let attrs: [NSAttributedString.Key: Any] = [
+            .foregroundColor: NSColor.systemBlue,
+            .font: NSFont.systemFont(ofSize: 12)
+        ]
+        label.draw(at: NSPoint(x: (p0.x + p1.x) / 2 + 4, y: (p0.y + p1.y) / 2 + 4), withAttributes: attrs)
+    }
+
+    private func x(for position: Int) -> CGFloat {
+        guard bounds.width > 0, imageWidth > 0 else { return 0 }
+        let frac = CGFloat(position - firstTrace) / CGFloat(imageWidth)
+        return bounds.width * frac
+    }
+
+    private func y(for sample: Int) -> CGFloat {
+        guard bounds.height > 0 else { return 0 }
+        let shown = sampleSpan > 0 ? sampleSpan : max(totalSamples, 1)
+        let frac = CGFloat(sample - firstSample) / CGFloat(shown)
+        return bounds.height * (1 - frac)
     }
 
     private func normalizedRect(from a: NSPoint, to b: NSPoint) -> CGRect {
@@ -198,6 +261,15 @@ final class SectionNSView: NSImageView {
         let frac = max(0, min(1, pt.x / bounds.width))
         let raw = firstTrace + Int(frac * CGFloat(imageWidth))
         return min(max(0, raw), max(0, totalTraces - 1))
+    }
+
+    /// 视图坐标 → 采样号（采样 0 在顶部；夹到 [0, totalSamples-1]）；视图/图像高度非法时返回 nil。
+    private func sample(at pt: NSPoint) -> Int? {
+        guard bounds.height > 0, imageHeight > 0, totalSamples > 0 else { return nil }
+        let shown = sampleSpan > 0 ? sampleSpan : totalSamples
+        let frac = max(0, min(1, 1 - pt.y / bounds.height))   // 顶部 y 大 → 采样号小
+        let raw = firstSample + Int(frac * CGFloat(shown))
+        return min(max(0, raw), max(0, totalSamples - 1))
     }
 
     /// 把「位置」解析为上报用的真实道号：byOffset 模式下经 traceResolver 反查，否则原样。

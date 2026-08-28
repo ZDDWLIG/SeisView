@@ -97,7 +97,9 @@ struct ContentView: View {
                                     totalTraces: f.geometry.nTraces,
                                     totalSamples: f.geometry.ns) {
                         SectionView(model: model, cursor: model.cursor, image: model.render(),
-                                    totalTraces: f.geometry.nTraces, zoomRectMode: model.zoomRectMode)
+                                    totalTraces: f.geometry.nTraces, totalSamples: f.geometry.ns,
+                                    zoomRectMode: model.zoomRectMode,
+                                    velocityMode: model.velocityMode, velocityLine: model.velocityLine)
                     }
                     if model.showHeaderInspector {
                         Divider()
@@ -179,6 +181,15 @@ struct ContentView: View {
                 }
                 .toggleStyle(.button)
                 .help(l10n(.tbZoomRectHelp))
+                .disabled(model.file == nil)
+                Toggle(isOn: Binding(
+                    get: { model.velocityMode },
+                    set: { _ in model.toggleVelocityMode() }
+                )) {
+                    Label(l10n(.tbVelocity), systemImage: "ruler")
+                }
+                .toggleStyle(.button)
+                .help(l10n(.tbVelocityHelp))
                 .disabled(model.file == nil)
                 if model.compareMode != .single {
                     Button { model.resetView() } label: {
