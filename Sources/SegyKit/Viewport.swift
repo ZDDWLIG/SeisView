@@ -8,7 +8,7 @@ public struct Viewport: Equatable, Sendable {
     public var traceSpan: Int = 1200  // 显示的道数（屏宽上限，绝不一次解码全文件）
     public var firstSample: Int = 0
     public var sampleSpan: Int = 0    // 0 = 全部
-    public var gain: GainMode = .percentiles(0.01, 0.99)
+    public var gain: GainMode = .maxAbs
     public var palette: Palette = .grayscale
     /// 剖面横向排列方式。改它要整体重赋值 viewport（铁律）。
     public var traceOrder: TraceOrder = .byTrace

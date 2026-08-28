@@ -323,13 +323,18 @@ func runAll() {
     h.checkClose(Viewport.percentileBounds(clipPercent: 500).1, 1.0, 1e-6, "超上限钳到 100%")
     h.checkClose(Viewport.percentileBounds(clipPercent: 10).0, 0.05, 1e-6, "超下限钳到 90%")
 
-    // 默认视口的 clipPercent 必须和默认 gain 载荷自洽（默认 98% ↔ (0.01, 0.99)）
+    // 默认视口：归一化方式为 maxAbs；clipPercent 仍记住 98，供切回百分位时重建载荷。
     let dv = Viewport()
     h.checkClose(dv.clipPercent, 98, 1e-9, "默认 clipPercent 98")
-    h.check(dv.gain == .percentiles(0.01, 0.99), "默认 gain 与 98% 自洽")
+    h.check(dv.gain == .maxAbs, "默认 gain 为 maxAbs")
+    // 切回百分位时仍用记住的 98% 重建（证明 clipPercent 没被 maxAbs 默认破坏）
+    var dvc = Viewport()
+    dvc.setGainKind(.percentiles)
+    h.check(dvc.gain == .percentiles(0.01, 0.99), "切回百分位用记住的 98%")
 
     // setClipPercent：gain 是百分位时同步重算载荷，真值只有 clipPercent 一个，不会漂移
     var cv = Viewport()
+    cv.setGainKind(.percentiles)   // 默认已是 maxAbs，先切回百分位以测试 setClipPercent 的载荷同步
     cv.setClipPercent(99)
     h.checkClose(cv.clipPercent, 99, 1e-9, "setClipPercent 存值")
     h.check(cv.gain == .percentiles(0.005, 0.995), "setClipPercent 同步 gain 载荷")
@@ -356,6 +361,7 @@ func runAll() {
 
     // resetView 也必须保留百分比
     var rp = Viewport()
+    rp.setGainKind(.percentiles)   // 默认已是 maxAbs，先切回百分位
     rp.setClipPercent(99)
     rp.firstTrace = 900
     rp.resetView()
@@ -504,6 +510,7 @@ func runAll() {
 
     // 百分比滑块：不同裁剪比例必须真的换画面
     var clipped = base
+    clipped.setGainKind(.percentiles)   // 默认已是 maxAbs，先切回百分位
     clipped.setClipPercent(90)
     h.check(pixels(e2eFileA, clipped) != basePx, "改 clipPercent 画面改变（百分比滑块有效）")
 
