@@ -20,7 +20,10 @@ public enum WiggleRenderer {
         let colW = CGFloat(max(1, width / nTraces))
         let stride = max(1, ns / height)
         let n = (ns + stride - 1) / stride
-        let ampScale = max(CGFloat(1), CGFloat(colW) / 2)
+        // 图像宽 == 道数（每道 1px），满幅度摆 1px = 一整道宽、与相邻道相接（稠密、无缝隙）。
+        // 注意：不要加宽图像（width > nTraces）——NSImageView 会按图像固有尺寸显示，
+        // 加宽后剖面被拉伸、可见道变少。
+        let ampScale = max(CGFloat(1), CGFloat(colW) / 2 - 1)
 
         for t in 0..<min(nTraces, width) {
             let base = t * ns

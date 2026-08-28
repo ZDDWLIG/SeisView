@@ -19,6 +19,8 @@ struct SectionView: NSViewRepresentable {
     let velocityMode: Bool
     /// 已完成的视速度线（蓝线绘制用）。
     let velocityLine: VelocityLine?
+    /// 视速度锚点（第一次点击后显示一个点）。
+    let velocityAnchor: VelocityAnchor?
 
     func makeNSView(context: Context) -> SectionNSView {
         let v = SectionNSView()
@@ -59,6 +61,7 @@ struct SectionView: NSViewRepresentable {
         v.spectrumLocalMode = spectrumLocalMode
         v.velocityMode = velocityMode
         v.velocityLine = velocityLine
+        v.velocityAnchor = velocityAnchor
         v.firstSample = model.viewport.firstSample
         v.sampleSpan = model.viewport.sampleSpan
         v.imageHeight = image?.height ?? 0
@@ -105,6 +108,8 @@ final class SectionNSView: NSImageView {
     var velocityMode = false
     /// 已完成的视速度线（蓝线绘制用）。
     var velocityLine: VelocityLine?
+    /// 视速度锚点（第一次点击后显示一个点）。
+    var velocityAnchor: VelocityAnchor?
     var firstSample = 0
     var sampleSpan = 0
     var imageHeight = 0
@@ -195,25 +200,50 @@ final class SectionNSView: NSImageView {
             NSColor.controlAccentColor.setStroke()
             NSBezierPath(rect: r).stroke()
         }
+        if let a = velocityAnchor {
+            drawDot(at: NSPoint(x: x(for: a.position), y: y(for: a.sample)))
+        }
         if let line = velocityLine {
             drawVelocityLine(line)
         }
     }
 
+    private static let velocityGreen = NSColor(calibratedRed: 0.0, green: 0.9, blue: 0.1, alpha: 1.0)
+
     private func drawVelocityLine(_ line: VelocityLine) {
         let p0 = NSPoint(x: x(for: line.start.position), y: y(for: line.start.sample))
         let p1 = NSPoint(x: x(for: line.end.position), y: y(for: line.end.sample))
+        // 连线（加粗）
         let path = NSBezierPath()
         path.move(to: p0); path.line(to: p1)
-        path.lineWidth = 2
-        NSColor.systemBlue.setStroke()
+        path.lineWidth = 3
+        Self.velocityGreen.setStroke()
         path.stroke()
+        // 两端各一个点
+        drawDot(at: p0)
+        drawDot(at: p1)
+        // 速度标签：沿线的朝上法向偏移，避开线本身，居中且更大字体
         let label = String(format: "v=%.0f m/s", line.mps) as NSString
         let attrs: [NSAttributedString.Key: Any] = [
-            .foregroundColor: NSColor.systemBlue,
-            .font: NSFont.systemFont(ofSize: 12)
+            .foregroundColor: Self.velocityGreen,
+            .font: NSFont.boldSystemFont(ofSize: 18)
         ]
-        label.draw(at: NSPoint(x: (p0.x + p1.x) / 2 + 4, y: (p0.y + p1.y) / 2 + 4), withAttributes: attrs)
+        let mid = NSPoint(x: (p0.x + p1.x) / 2, y: (p0.y + p1.y) / 2)
+        let dx = p1.x - p0.x, dy = p1.y - p0.y
+        let len = max(hypot(dx, dy), 0.001)
+        var nx = -dy / len, ny = dx / len
+        if ny < 0 { nx = -nx; ny = -ny }   // 取朝上的法向分量
+        let offset: CGFloat = 30
+        let c = NSPoint(x: mid.x + nx * offset, y: mid.y + ny * offset)
+        let sz = label.size(withAttributes: attrs)
+        label.draw(at: NSPoint(x: c.x - sz.width / 2, y: c.y - sz.height / 2), withAttributes: attrs)
+    }
+
+    private func drawDot(at p: NSPoint) {
+        let r: CGFloat = 4
+        let rect = NSRect(x: p.x - r, y: p.y - r, width: r * 2, height: r * 2)
+        Self.velocityGreen.setFill()
+        NSBezierPath(ovalIn: rect).fill()
     }
 
     private func x(for position: Int) -> CGFloat {

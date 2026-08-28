@@ -303,7 +303,7 @@ final class DocumentModel: ObservableObject {
             data = r.readDecoded(traceRange: plan.traceRange, sampleRange: plan.sampleRange)
         }
         return WiggleRenderer.makeImage(data, ns: plan.decodedNs, nTraces: plan.traceRange.count,
-                                        width: plan.traceRange.count * 4, height: plan.binHeight)
+                                        width: plan.traceRange.count, height: plan.binHeight)
     }
 
     /// 解码 + 分箱（不含增益/栅格化），按几何键缓存。纵向缩放：sampleSpan>0 时只解码该采样窗，

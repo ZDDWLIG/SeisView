@@ -2,7 +2,7 @@ import SwiftUI
 import SegyKit
 import Localization
 
-/// 振幅谱弹窗：自绘坐标图 + x/y 轴范围输入 + 归一化开关。
+/// 振幅谱弹窗：自绘坐标图（含刻度）+ x/y 轴范围输入 + 分贝谱开关。
 struct SpectrumView: View {
     let result: SpectrumResult
     @ObservedObject var l10n: L10n
@@ -12,11 +12,32 @@ struct SpectrumView: View {
     @State private var xMax = 0.0
     @State private var yMin = 0.0
     @State private var yMax = 0.0
-    @State private var normalized = false
+    @State private var db = false
     @State private var didInit = false
 
     private var nyquist: Double { result.spectrum.nyquist }
     private var maxAmp: Double { Double(result.spectrum.amplitudes.max() ?? 0) }
+
+    /// 频谱折线点（数据坐标：x=Hz，y=振幅或 dB），裁到 [xMin, xMax]。
+    private var points: [CGPoint] {
+        let spec = result.spectrum
+        guard maxAmp > 0 else { return [] }
+        var out: [CGPoint] = []
+        for i in 0..<spec.frequencies.count {
+            let f = spec.frequencies[i]
+            guard f >= xMin && f <= xMax else { continue }
+            let amp = Double(spec.amplitudes[i])
+            let yValue: Double
+            if db {
+                let a = max(amp, maxAmp * 1e-12)
+                yValue = 20 * log10(a / maxAmp)
+            } else {
+                yValue = amp
+            }
+            out.append(CGPoint(x: f, y: yValue))
+        }
+        return out
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -24,39 +45,47 @@ struct SpectrumView: View {
                 Text(l10n(.spectrumTitle)).font(.headline)
                 Text(result.title).font(.system(size: 11)).foregroundColor(.secondary)
                 Spacer()
+                closeButton
             }
-            GeometryReader { geo in
-                SpectrumPlot(result: result,
-                             xMin: xMin, xMax: xMax, yMin: yMin, yMax: yMax,
-                             normalized: normalized)
-                    .frame(width: geo.size.width, height: geo.size.height)
-            }
+            LinePlot(points: points,
+                     xMin: xMin, xMax: xMax, yMin: yMin, yMax: yMax,
+                     xTitle: l10n(.spectrumXAxis),
+                     yTitle: db ? l10n(.spectrumUnitDb) : l10n(.spectrumYAxis),
+                     drawsZeroLine: false,
+                     lineWidth: 2.5)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
             HStack(spacing: 16) {
                 rangeField(l10n(.spectrumXRange), "\(l10n(.spectrumUnitHz))", $xMin, $xMax)
                 rangeField(l10n(.spectrumYRange), "", $yMin, $yMax)
                 Toggle(l10n(.spectrumNormalize), isOn: Binding(
-                    get: { normalized },
+                    get: { db },
                     set: { on in
-                        normalized = on
-                        // 归一化把曲线缩到 [0,1]，y 轴上限必须跟着变，否则曲线挤在底部看不见。
-                        yMax = on ? 1 : maxAmp
+                        db = on
+                        if on { yMin = -120; yMax = 0 } else { yMin = 0; yMax = maxAmp }
                     }
                 ))
                 Button(l10n(.spectrumAuto)) { resetRanges() }
                 Spacer()
-                Button(l10n(.tbReset)) { dismiss() }
             }
         }
         .padding(14)
-        .frame(minWidth: 680, minHeight: 420)
-        .onAppear {
-            if !didInit { resetRanges(); didInit = true }
+        .frame(minWidth: 820, minHeight: 540)
+        .onAppear { if !didInit { resetRanges(); didInit = true } }
+    }
+
+    private var closeButton: some View {
+        Button { dismiss() } label: {
+            Image(systemName: "xmark.circle.fill")
+                .font(.system(size: 16))
+                .foregroundColor(.secondary)
         }
+        .buttonStyle(.plain)
     }
 
     private func resetRanges() {
-        xMin = 0; xMax = nyquist
-        yMin = 0; yMax = normalized ? 1 : maxAmp
+        // x 默认显示 0–100 Hz（若 Nyquist 更小则取 Nyquist）
+        xMin = 0; xMax = min(100, nyquist)
+        if db { yMin = -120; yMax = 0 } else { yMin = 0; yMax = maxAmp }
     }
 
     private func rangeField(_ label: String, _ unit: String,
@@ -68,40 +97,5 @@ struct SpectrumView: View {
             TextField("", value: hi, format: .number).frame(width: 70)
             if !unit.isEmpty { Text(unit).font(.system(size: 10)).foregroundColor(.secondary) }
         }
-    }
-}
-
-/// 频谱折线图：把 [xMin,xMax]×[yMin,yMax] 内的点画成折线，归一化时 y 除以 max。
-struct SpectrumPlot: View {
-    let result: SpectrumResult
-    let xMin: Double, xMax: Double, yMin: Double, yMax: Double
-    let normalized: Bool
-
-    var body: some View {
-        Canvas { ctx, size in
-            guard size.width > 0, size.height > 0 else { return }
-            let spec = result.spectrum
-            let xr = xMax > xMin ? xMax - xMin : 1
-            let yr = yMax > yMin ? yMax - yMin : 1
-            let scale = normalized ? Double(spec.amplitudes.max() ?? 1) : 1
-            guard scale > 0 else { return }
-            // 背景 + 边框
-            ctx.fill(Path(CGRect(origin: .zero, size: size)), with: .color(.white))
-            // 折线
-            var path = Path()
-            var started = false
-            for i in 0..<spec.frequencies.count {
-                let f = spec.frequencies[i]
-                guard f >= xMin && f <= xMax else { continue }
-                let amp = Double(spec.amplitudes[i]) / scale
-                guard amp >= yMin && amp <= yMax else { continue }
-                let px = CGFloat((f - xMin) / xr) * size.width
-                let py = size.height - CGFloat((amp - yMin) / yr) * size.height
-                if !started { path.move(to: CGPoint(x: px, y: py)); started = true }
-                else { path.addLine(to: CGPoint(x: px, y: py)) }
-            }
-            ctx.stroke(path, with: .color(.black), lineWidth: 1)
-        }
-        .background(Color.white)
     }
 }

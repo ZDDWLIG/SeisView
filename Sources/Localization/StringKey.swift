@@ -30,12 +30,12 @@ public enum S: String, CaseIterable, Sendable {
     case tbPrevShot, tbPrevShotHelp, tbNextShot, tbNextShotHelp
 
     // 单道波形弹窗
-    case singleTraceTitle, singleTraceAxisTime, singleTraceAxisAmp
+    case singleTraceTitle, singleTraceAxisTime, singleTraceAxisAmp, singleTraceTimeRange
 
     // 振幅谱弹窗
     case tbSpectrum, spectrumLocal, spectrumGlobal, spectrumTitle
     case spectrumXAxis, spectrumYAxis, spectrumXRange, spectrumYRange
-    case spectrumNormalize, spectrumAuto, spectrumUnitHz
+    case spectrumNormalize, spectrumAuto, spectrumUnitHz, spectrumUnitDb
 
     // 缩放条
     case zoomTraceAxis, zoomTraceAxisHelp, zoomTimeAxis, zoomTimeAxisHelp

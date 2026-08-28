@@ -100,7 +100,8 @@ struct ContentView: View {
                                     totalTraces: f.geometry.nTraces, totalSamples: f.geometry.ns,
                                     zoomRectMode: model.zoomRectMode,
                                     spectrumLocalMode: model.spectrumLocalMode,
-                                    velocityMode: model.velocityMode, velocityLine: model.velocityLine)
+                                    velocityMode: model.velocityMode, velocityLine: model.velocityLine,
+                                    velocityAnchor: model.velocityAnchor)
                     }
                     if model.showHeaderInspector {
                         Divider()

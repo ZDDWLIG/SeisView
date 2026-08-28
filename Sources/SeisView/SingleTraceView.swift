@@ -2,71 +2,90 @@ import SwiftUI
 import SegyKit
 import Localization
 
-/// 单道波形弹窗：横轴时间(ms)、纵轴振幅，自绘折线。
+/// 单道波形弹窗：横轴时间(s)、纵轴振幅，带坐标刻度与时间范围选择。
 struct SingleTraceView: View {
     let data: SingleTraceData
     @ObservedObject var l10n: L10n
     @Environment(\.dismiss) private var dismiss
 
+    @State private var tMin = 0.0
+    @State private var tMax = 0.0
+    @State private var didInit = false
+
+    /// 整道时长（秒）。
+    private var fullSec: Double {
+        Double(max(0, data.samples.count - 1)) * Double(data.dtMicros) / 1e6
+    }
+
+    /// 振幅范围（整道 maxAbs，缩放时间不改变纵向尺度）。
+    private var ampMax: Float {
+        max(data.samples.map { abs($0) }.max() ?? 1, 1)
+    }
+
+    /// 波形折线点（数据坐标：x=秒，y=振幅），裁到 [tMin, tMax]。
+    private var points: [CGPoint] {
+        guard data.samples.count > 1 else { return [] }
+        let total = Double(data.samples.count - 1) * Double(data.dtMicros) / 1e6
+        var out: [CGPoint] = []
+        for i in 0..<data.samples.count {
+            let t = Double(i) / Double(data.samples.count - 1) * total
+            guard t >= tMin && t <= tMax else { continue }
+            out.append(CGPoint(x: t, y: Double(data.samples[i])))
+        }
+        return out
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack {
                 Text(l10n(.singleTraceTitle)).font(.headline)
-                Spacer()
                 if let ffid = data.ffid {
                     Text("FFID \(ffid)").font(.system(size: 11)).foregroundColor(.secondary)
                 }
                 Text(l10n.f(.hdrTraceLabel, ["\(data.trace + 1)", ""]))
                     .font(.system(size: 11)).foregroundColor(.secondary)
-            }
-            GeometryReader { geo in
-                WaveformPlot(samples: data.samples, dtMicros: data.dtMicros)
-                    .frame(width: geo.size.width, height: geo.size.height)
-            }
-            HStack {
-                Text(l10n(.singleTraceAxisTime)).font(.system(size: 10)).foregroundColor(.secondary)
                 Spacer()
-                Text(l10n(.singleTraceAxisAmp)).font(.system(size: 10)).foregroundColor(.secondary)
+                closeButton
             }
-            HStack {
+            LinePlot(points: points,
+                     xMin: tMin, xMax: tMax,
+                     yMin: Double(-ampMax), yMax: Double(ampMax),
+                     xTitle: l10n(.singleTraceAxisTime),
+                     yTitle: l10n(.singleTraceAxisAmp),
+                     drawsZeroLine: true,
+                     lineWidth: 2.5)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            HStack(spacing: 8) {
+                rangeField()
+                Button(l10n(.spectrumAuto)) { resetRange() }
                 Spacer()
-                Button(l10n(.tbReset)) { dismiss() }
             }
         }
         .padding(14)
-        .frame(minWidth: 520, minHeight: 320)
+        .frame(minWidth: 1000, minHeight: 500)
+        .onAppear { if !didInit { resetRange(); didInit = true } }
     }
-}
 
-/// 波形图：时间 → x，振幅 → y（自动缩放到自身 maxAbs）。
-struct WaveformPlot: View {
-    let samples: [Float]
-    let dtMicros: Int
-
-    var body: some View {
-        Canvas { ctx, size in
-            guard samples.count > 1 else { return }
-            var m: Float = 0
-            for v in samples { m = max(m, abs(v)) }
-            if m <= 0 { return }
-            let midY = size.height / 2
-            let ampScale = Float(size.height / 2 - 8)
-            let totalMs = Float(samples.count - 1) * Float(dtMicros) / 1000
-            var path = Path()
-            for (i, v) in samples.enumerated() {
-                let x = CGFloat(i) / CGFloat(samples.count - 1) * size.width
-                let y = midY - CGFloat(v / m * ampScale)
-                if i == 0 { path.move(to: CGPoint(x: x, y: y)) }
-                else { path.addLine(to: CGPoint(x: x, y: y)) }
-            }
-            ctx.stroke(path, with: .color(.black), lineWidth: 1)
-            // 零线
-            var zero = Path()
-            zero.move(to: CGPoint(x: 0, y: midY))
-            zero.addLine(to: CGPoint(x: size.width, y: midY))
-            ctx.stroke(zero, with: .color(.gray.opacity(0.5)), lineWidth: 0.5)
-            _ = totalMs
+    private var closeButton: some View {
+        Button { dismiss() } label: {
+            Image(systemName: "xmark.circle.fill")
+                .font(.system(size: 16))
+                .foregroundColor(.secondary)
         }
-        .background(Color.white)
+        .buttonStyle(.plain)
+    }
+
+    private func resetRange() {
+        tMin = 0; tMax = fullSec
+    }
+
+    private func rangeField() -> some View {
+        HStack(spacing: 4) {
+            Text(l10n(.singleTraceTimeRange)).font(.system(size: 11)).foregroundColor(.secondary)
+            TextField("", value: $tMin, format: .number).frame(width: 70)
+            Text("–").foregroundColor(.secondary)
+            TextField("", value: $tMax, format: .number).frame(width: 70)
+            Text("s").font(.system(size: 10)).foregroundColor(.secondary)
+        }
     }
 }
