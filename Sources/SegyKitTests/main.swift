@@ -853,6 +853,24 @@ func runAll() {
         h.checkClose(Velocity.apparentVelocity(offsetA: -2000, offsetB: 2000, sampleA: 0, sampleB: 100, dtMicros: 1000)!, 40000, 1e-3, "负 offset 差正确")
     }
 
+    // MARK: - Wiggle
+    do {
+        // Palette.wiggle 分支：color 返回黑，不崩
+        let (wR, wG, wB) = Rasterizer.color(for: .wiggle, t: 0.5)
+        h.check(wR == 0 && wG == 0 && wB == 0, "wiggle 配色恒黑")
+        // 全零输入 → 白底（无黑像素）
+        let wImg = WiggleRenderer.makeImage([0, 0, 0, 0], ns: 4, nTraces: 1, width: 10, height: 10)!
+        h.check(wImg.width == 10 && wImg.height == 10, "wiggle 图像尺寸")
+        let wData = [UInt8](wImg.dataProvider!.data! as Data)
+        h.check(wData[0] == 255 && wData[1] == 255 && wData[2] == 255, "wiggle 全零 → 白底")
+        // 非零输入 → 存在黑像素（画出了波形）
+        let wImg2 = WiggleRenderer.makeImage([0, 1, -1, 0], ns: 4, nTraces: 1, width: 10, height: 10)!
+        let wData2 = [UInt8](wImg2.dataProvider!.data! as Data)
+        h.check(wData2.contains(0), "wiggle 非零 → 有黑像素")
+        // 非法尺寸不崩
+        h.check(WiggleRenderer.makeImage([], ns: 0, nTraces: 0, width: 0, height: 0) == nil, "wiggle 非法尺寸 → nil")
+    }
+
     // MARK: - 按偏移距排列
 
     do {

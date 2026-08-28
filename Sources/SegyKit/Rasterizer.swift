@@ -6,6 +6,7 @@ public enum Palette: Sendable, Equatable, Hashable {
     case redWhiteBlue     // 红白蓝（utils.py iop=4）
     case redWhiteBlack    // 红白黑（utils.py iop=2）
     case brownWhiteBlack  // 棕白黑（utils.py iop=1）
+    case wiggle           // 波形变面积（非调色板，走独立渲染路径）
 }
 
 public enum Rasterizer {
@@ -43,6 +44,8 @@ public enum Rasterizer {
         case .grayscale:
             let g = UInt8(max(0, min(255, Int(t * 255))))
             return (g, g, g)
+        case .wiggle:
+            return (0, 0, 0)   // wiggle 不走 LUT；恒黑，仅保证 switch 穷尽
         case .redWhiteBlue, .redWhiteBlack, .brownWhiteBlack:
             let lut = luts[p]!
             let idx = min(255, max(0, Int(t * 255)))
