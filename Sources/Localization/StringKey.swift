@@ -32,6 +32,11 @@ public enum S: String, CaseIterable, Sendable {
     // 单道波形弹窗
     case singleTraceTitle, singleTraceAxisTime, singleTraceAxisAmp
 
+    // 振幅谱弹窗
+    case tbSpectrum, spectrumLocal, spectrumGlobal, spectrumTitle
+    case spectrumXAxis, spectrumYAxis, spectrumXRange, spectrumYRange
+    case spectrumNormalize, spectrumAuto, spectrumUnitHz
+
     // 缩放条
     case zoomTraceAxis, zoomTraceAxisHelp, zoomTimeAxis, zoomTimeAxisHelp
 

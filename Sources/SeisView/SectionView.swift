@@ -13,6 +13,8 @@ struct SectionView: NSViewRepresentable {
     let totalSamples: Int
     /// 局部放大模式。作为值参数传入（而非读 model），保证 SwiftUI 检测到变化并触发 updateNSView。
     let zoomRectMode: Bool
+    /// 频谱局部框选模式。作为值参数传入（而非读 model），保证 SwiftUI 检测到变化并触发 updateNSView。
+    let spectrumLocalMode: Bool
     /// 视速度测算模式。作为值参数传入（而非读 model），保证 SwiftUI 检测到变化并触发 updateNSView。
     let velocityMode: Bool
     /// 已完成的视速度线（蓝线绘制用）。
@@ -38,6 +40,9 @@ struct SectionView: NSViewRepresentable {
         v.onZoomRect = { [weak model] r in
             MainActor.assumeIsolated { model?.zoomToRect(normalized: r) }
         }
+        v.onSpectrumRect = { [weak model] r in
+            MainActor.assumeIsolated { model?.spectrumFromRect(normalized: r) }
+        }
         v.onVelocityClick = { [weak model] pos, sample in
             MainActor.assumeIsolated { model?.velocityClick(position: pos, sample: sample) }
         }
@@ -51,6 +56,7 @@ struct SectionView: NSViewRepresentable {
         v.imageWidth = image?.width ?? 0
         v.totalTraces = totalTraces
         v.zoomRectMode = zoomRectMode
+        v.spectrumLocalMode = spectrumLocalMode
         v.velocityMode = velocityMode
         v.velocityLine = velocityLine
         v.firstSample = model.viewport.firstSample
@@ -82,6 +88,8 @@ final class SectionNSView: NSImageView {
     var onSelect: ((Int) -> Void)?
     /// 局部放大框选完成回调：参数为归一化矩形（x/y ∈ [0,1]，原点在左下）。
     var onZoomRect: ((CGRect) -> Void)?
+    /// 频谱局部框选完成回调：参数为归一化矩形（x/y ∈ [0,1]，原点在左下）。
+    var onSpectrumRect: ((CGRect) -> Void)?
 
     // 更新于 updateNSView：用于把视图坐标换算成绝对道号。
     var firstTrace: Int = 0
@@ -89,6 +97,8 @@ final class SectionNSView: NSImageView {
     var totalTraces: Int = 0
     /// 局部放大模式：为 true 时双指点击（右键）拖动框选矩形，而不是左键选道。
     var zoomRectMode = false
+    /// 频谱局部框选模式：为 true 时右键拖动框选矩形，松手后计算该区域频谱。
+    var spectrumLocalMode = false
     /// 视速度测算点击回调：参数为（剖面位置，采样号）。
     var onVelocityClick: ((Int, Int) -> Void)?
     /// 视速度测算模式：为 true 时左键两次分别设锚点/连线，不再选道。
@@ -151,9 +161,9 @@ final class SectionNSView: NSImageView {
         }
     }
 
-    /// 双指点击 = 右键（secondary click）。局部放大模式下用右键拖动框选矩形。
+    /// 双指点击 = 右键（secondary click）。局部放大 / 频谱局部模式下用右键拖动框选矩形。
     override func rightMouseDown(with event: NSEvent) {
-        guard zoomRectMode else { return }
+        guard zoomRectMode || spectrumLocalMode else { return }
         let p = convert(event.locationInWindow, from: nil)
         zoomDragStart = p
         zoomDragCurrent = p
@@ -171,7 +181,9 @@ final class SectionNSView: NSImageView {
         zoomDragStart = nil
         zoomDragCurrent = nil
         needsDisplay = true
-        onZoomRect?(normalizedRect(from: start, to: current))
+        let rect = normalizedRect(from: start, to: current)
+        if zoomRectMode { onZoomRect?(rect) }
+        else if spectrumLocalMode { onSpectrumRect?(rect) }
     }
 
     override func draw(_ dirtyRect: NSRect) {

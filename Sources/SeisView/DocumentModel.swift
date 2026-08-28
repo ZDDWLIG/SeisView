@@ -59,6 +59,10 @@ final class DocumentModel: ObservableObject {
     @Published var velocityLine: VelocityLine?
     /// 单道波形弹窗的数据（非 nil 时弹出 sheet）。
     @Published var singleTrace: SingleTraceData?
+    /// 振幅谱弹窗的数据（非 nil 时弹出 sheet）。
+    @Published var spectrumResult: SpectrumResult?
+    /// 频谱局部框选模式：为 true 时在剖面上框选矩形、松开后计算该区域频谱（一次性，完成后自动退出）。
+    @Published var spectrumLocalMode = false
     let reader: TraceReader? = nil
     let cursor = CursorStore()
     /// 图像缓存：按文件分桶，键为完整 viewport（含 gain/palette）。
@@ -378,6 +382,63 @@ final class DocumentModel: ObservableObject {
                 guard let self, self.file?.url == url else { return }
                 self.offsetIndex = (try? result.get())
                 self.offsetIndexReady = true
+            }
+        }
+    }
+
+    // MARK: - 振幅谱
+
+    /// 局部频谱：由框选矩形换算道区间 × 采样区间后后台计算。
+    func spectrumFromRect(normalized r: CGRect) {
+        guard let f = file, r.width > 0.001, r.height > 0.001 else {
+            spectrumLocalMode = false
+            return
+        }
+        let n = f.geometry.nTraces, ns = f.geometry.ns
+        let v = viewport
+        let shownTraces = min(max(1, v.traceSpan), n)
+        let t0 = v.firstTrace + Int(r.minX * CGFloat(shownTraces))
+        let t1 = v.firstTrace + Int(r.maxX * CGFloat(shownTraces))
+        let shownSamples = v.sampleSpan > 0 ? v.sampleSpan : ns
+        let sTop = v.firstSample + Int((1 - r.maxY) * CGFloat(shownSamples))
+        let sBottom = v.firstSample + Int((1 - r.minY) * CGFloat(shownSamples))
+        let traceRange = max(0, min(t0, n - 1))..<max(1, min(t1, n))
+        let sampleRange = max(0, min(sTop, ns - 1))..<max(1, min(sBottom, ns))
+        spectrumLocalMode = false
+        computeSpectrum(traceRange: traceRange, sampleRange: sampleRange, title: l10nTitle(.spectrumLocal))
+    }
+
+    /// 全局频谱：整个文件均匀抽道。
+    func computeGlobalSpectrum() {
+        guard let f = file else { return }
+        computeSpectrum(traceRange: 0..<f.geometry.nTraces, sampleRange: nil, title: l10nTitle(.spectrumGlobal))
+    }
+
+    /// 取当前语言下某 key 的文案（频谱 title 需要在后台结果里携带，用当前语言快照）。
+    private func l10nTitle(_ key: S) -> String {
+        string(key, L10n.shared.lang)
+    }
+
+    /// 后台：抽 ≤400 道 → 读样 → 平均 → FFT → 发布结果。仿 buildShots 的 reopen + url 比对。
+    private func computeSpectrum(traceRange: Range<Int>, sampleRange: Range<Int>?, title: String) {
+        guard let f = file else { return }
+        let url = f.url
+        let ns = sampleRange.map { $0.count } ?? f.geometry.ns
+        let dt = f.geometry.dtMicros
+        Task.detached(priority: .userInitiated) { [weak self] in
+            let result = Result<Spectrum, Error> {
+                let reopened = try SegyFile.open(url: url)
+                let reader = TraceReader(file: reopened)
+                let indices = SpectrumBuilder.sampledIndices(range: traceRange, maxTraces: 400)
+                let data = reader.readDecoded(traceIndices: indices, sampleRange: sampleRange)
+                let stacked = SpectrumBuilder.stack(data, nTraces: indices.count, ns: ns)
+                return FFT.amplitudeSpectrum(stacked, dtMicros: dt)
+            }
+            await MainActor.run {
+                guard let self, self.file?.url == url else { return }
+                self.spectrumResult = (try? result.get()).map {
+                    SpectrumResult(spectrum: $0, title: title, ns: ns, dtMicros: dt)
+                }
             }
         }
     }

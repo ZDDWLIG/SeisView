@@ -5,7 +5,7 @@ import Localization
 @MainActor
 func runAll() {
     let h = Harness()
-    h.check(SegyKit.version == "0.1.0", "SegyKit version")
+    h.check(SegyKit.version == "0.4.0", "SegyKit version")
 
     // 大端读取
     var beBytes: [UInt8] = [0x01, 0x02, 0x03, 0x04]

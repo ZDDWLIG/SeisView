@@ -26,6 +26,7 @@ struct CompareLayout: View {
                         image: model.render(file: f, viewport: model.viewport),
                         totalTraces: f.geometry.nTraces, totalSamples: f.geometry.ns,
                         zoomRectMode: model.zoomRectMode,
+                        spectrumLocalMode: model.spectrumLocalMode,
                         velocityMode: model.velocityMode, velocityLine: model.velocityLine)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .clipped()

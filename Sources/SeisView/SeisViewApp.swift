@@ -99,6 +99,7 @@ struct ContentView: View {
                         SectionView(model: model, cursor: model.cursor, image: model.render(),
                                     totalTraces: f.geometry.nTraces, totalSamples: f.geometry.ns,
                                     zoomRectMode: model.zoomRectMode,
+                                    spectrumLocalMode: model.spectrumLocalMode,
                                     velocityMode: model.velocityMode, velocityLine: model.velocityLine)
                     }
                     if model.showHeaderInspector {
@@ -197,6 +198,17 @@ struct ContentView: View {
                 }
                 .help(l10n(.tbSingleTraceHelp))
                 .disabled(model.file == nil)
+                Menu {
+                    Button(l10n(.spectrumLocal)) {
+                        model.zoomRectMode = false
+                        model.spectrumLocalMode = true
+                    }
+                    Button(l10n(.spectrumGlobal)) { model.computeGlobalSpectrum() }
+                } label: {
+                    Label(l10n(.tbSpectrum), systemImage: "chart.bar.xaxis")
+                }
+                .help(l10n(.tbSpectrum))
+                .disabled(model.file == nil)
                 if model.compareMode != .single {
                     Button { model.resetView() } label: {
                         Label(l10n(.tbAlign), systemImage: "align.horizontal.center")
@@ -225,6 +237,12 @@ struct ContentView: View {
             set: { if $0 == nil { model.singleTrace = nil } }
         )) { data in
             SingleTraceView(data: data, l10n: l10n)
+        }
+        .sheet(item: Binding(
+            get: { model.spectrumResult },
+            set: { if $0 == nil { model.spectrumResult = nil } }
+        )) { result in
+            SpectrumView(result: result, l10n: l10n)
         }
     }
 }
