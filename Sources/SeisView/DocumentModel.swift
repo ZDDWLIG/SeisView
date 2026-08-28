@@ -269,10 +269,31 @@ final class DocumentModel: ObservableObject {
         if let hit = imageCache[file.url], hit.viewport == viewport {
             return hit.image
         }
+        if viewport.palette == .wiggle {
+            guard let img = renderWiggle(file: file, viewport: viewport) else { return nil }
+            imageCache[file.url] = (viewport: viewport, image: img)
+            return img
+        }
         let b = binned(file: file, viewport: viewport)
         let img = Rasterizer.makeImage(Gain.apply(b, viewport.gain), palette: viewport.palette)
         imageCache[file.url] = (viewport: viewport, image: img)
         return img
+    }
+
+    /// wiggle 渲染：跳过 min/max 分箱，直接拿解码样本画波形变面积。
+    /// 宽 = 道数（traceRange.count），高 = decodePlan.binHeight（全采样 800 / 窗口化 = sampleSpan）。
+    private func renderWiggle(file: SegyFile, viewport: Viewport) -> CGImage? {
+        let plan = viewport.decodePlan(nTraces: file.geometry.nTraces, ns: file.geometry.ns)
+        let r = TraceReader(file: file, maxThreads: 8)
+        let data: [Float]
+        if viewport.traceOrder != .byTrace, let idx = offsetIndex {
+            let indices = OffsetIndexLookup.traces(idx, positions: plan.traceRange, order: viewport.traceOrder)
+            data = r.readDecoded(traceIndices: indices, sampleRange: plan.sampleRange)
+        } else {
+            data = r.readDecoded(traceRange: plan.traceRange, sampleRange: plan.sampleRange)
+        }
+        return WiggleRenderer.makeImage(data, ns: plan.decodedNs, nTraces: plan.traceRange.count,
+                                        width: plan.traceRange.count, height: plan.binHeight)
     }
 
     /// 解码 + 分箱（不含增益/栅格化），按几何键缓存。纵向缩放：sampleSpan>0 时只解码该采样窗，

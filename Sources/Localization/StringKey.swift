@@ -19,7 +19,7 @@ public enum S: String, CaseIterable, Sendable {
     // 工具栏
     case tbGain, gainPercentiles, gainAGC, gainPerTrace, gainMaxAbs, tbGainHelp
     case tbClipHelp
-    case tbPalette, paletteGray, paletteRedWhiteBlue, paletteRedWhiteBlack, paletteBrownWhiteBlack
+    case tbPalette, paletteGray, paletteRedWhiteBlue, paletteRedWhiteBlack, paletteBrownWhiteBlack, paletteWiggle
     case tbOrder, orderByTrace, orderByOffset, orderByOffsetAbs
     case tbHeaderToggle, tbHeaderToggleHelp
     case tbZoomRect, tbZoomRectHelp

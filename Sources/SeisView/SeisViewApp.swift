@@ -154,6 +154,7 @@ struct ContentView: View {
                     Text(l10n(.paletteRedWhiteBlue)).tag(Palette.redWhiteBlue)
                     Text(l10n(.paletteRedWhiteBlack)).tag(Palette.redWhiteBlack)
                     Text(l10n(.paletteBrownWhiteBlack)).tag(Palette.brownWhiteBlack)
+                    Text(l10n(.paletteWiggle)).tag(Palette.wiggle)
                 }
                 .help(l10n(.tbPalette))
                 Picker(l10n(.tbOrder), selection: Binding(
