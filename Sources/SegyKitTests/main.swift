@@ -839,6 +839,20 @@ func runAll() {
         h.check(SpectrumBuilder.sampledIndices(range: 0..<10, maxTraces: 400).count == 10, "小于上限时全取")
     }
 
+    // MARK: - 视速度
+    do {
+        // Δx = 3000−1000 = 2000，Δs = 50，dt=2000μs → Δt = 0.1s → v = 20000 m/s
+        h.checkClose(Velocity.apparentVelocity(offsetA: 1000, offsetB: 3000, sampleA: 0, sampleB: 50, dtMicros: 2000)!, 20000, 1e-3, "视速度 20000 m/s")
+        // 符号无关（取绝对值）
+        h.checkClose(Velocity.apparentVelocity(offsetA: 3000, offsetB: 1000, sampleA: 50, sampleB: 0, dtMicros: 2000)!, 20000, 1e-3, "视速度取绝对值")
+        // Δt = 0 → nil
+        h.check(Velocity.apparentVelocity(offsetA: 0, offsetB: 100, sampleA: 5, sampleB: 5, dtMicros: 2000) == nil, "Δt=0 → nil")
+        // Δx = 0 → nil
+        h.check(Velocity.apparentVelocity(offsetA: 100, offsetB: 100, sampleA: 0, sampleB: 5, dtMicros: 2000) == nil, "Δx=0 → nil")
+        // 负 offset 有效（道头 offset 有符号）
+        h.checkClose(Velocity.apparentVelocity(offsetA: -2000, offsetB: 2000, sampleA: 0, sampleB: 100, dtMicros: 1000)!, 40000, 1e-3, "负 offset 差正确")
+    }
+
     // MARK: - 按偏移距排列
 
     do {
