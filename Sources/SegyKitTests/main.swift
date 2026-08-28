@@ -795,6 +795,50 @@ func runAll() {
     }
     h.check(keysIdentical, "快捷键表两语按键写法相同、说明都非空")
 
+    // MARK: - FFT / 频谱
+    do {
+        // dt=2000μs → fs=500Hz，Nyquist=250Hz；N=256 → df=1/(256*0.002)=1.953125Hz
+        // f0 = 8*df = 15.625Hz 的正弦，峰值应落在 bin 8。
+        let dtUs = 2000
+        let n = 256
+        let df = 1.0 / (Double(n) * Double(dtUs) / 1e6)
+        let f0 = 8 * df
+        var sig = [Float](repeating: 0, count: n)
+        for k in 0..<n {
+            let t = Double(k) * Double(dtUs) / 1e6
+            sig[k] = Float(sin(2 * .pi * f0 * t))
+        }
+        let spec = FFT.amplitudeSpectrum(sig, dtMicros: dtUs)
+        h.check(spec.amplitudes.count == n / 2 + 1, "FFT 单边谱长 N/2+1")
+        h.checkClose(spec.frequencies[0], 0, 1e-9, "FFT 频率轴首点 0")
+        h.checkClose(spec.frequencies.last!, 250, 1e-3, "FFT 频率轴末点 = Nyquist 250Hz")
+        var peak = 0
+        for i in 1..<spec.amplitudes.count where spec.amplitudes[i] > spec.amplitudes[peak] { peak = i }
+        h.check(peak == 8, "FFT 正弦峰值落在 bin 8 (got \(peak))")
+        h.checkClose(spec.frequencies[8], f0, 1e-3, "FFT 峰值频率 = f0")
+
+        // 直流序列 → DC 为峰值（Hann 窗主瓣会把能量泄漏到相邻 bin，但 DC 仍显著最大）
+        let dc = FFT.amplitudeSpectrum([Float](repeating: 1, count: n), dtMicros: dtUs)
+        var dcNonZero = 0
+        for i in 1..<dc.amplitudes.count where dc.amplitudes[i] > dc.amplitudes[0] { dcNonZero += 1 }
+        h.check(dc.amplitudes[0] > 0 && dcNonZero == 0, "FFT 直流序列 DC 为峰值")
+
+        // 空/单样本不崩
+        h.check(FFT.amplitudeSpectrum([], dtMicros: 1000).amplitudes.count == 1, "FFT 空输入退化为单点")
+        h.check(FFT.amplitudeSpectrum([0.5], dtMicros: 1000).amplitudes[0] >= 0, "FFT 单样本不崩")
+
+        // 合成：2 道 × 3 采样平均
+        let st = SpectrumBuilder.stack([1, 2, 3, 3, 4, 5], nTraces: 2, ns: 3)
+        h.check(st == [2, 3, 4], "stack 平均正确")
+        h.check(SpectrumBuilder.stack([], nTraces: 0, ns: 0).isEmpty, "stack 空输入空输出")
+
+        // 抽样：1000 道抽 ≤400，含首末道
+        let idx = SpectrumBuilder.sampledIndices(range: 0..<1000, maxTraces: 400)
+        h.check(!idx.isEmpty && idx.count <= 400, "sampledIndices 不超过上限")
+        h.check(idx.first == 0 && idx.last == 999, "sampledIndices 含首末道")
+        h.check(SpectrumBuilder.sampledIndices(range: 0..<10, maxTraces: 400).count == 10, "小于上限时全取")
+    }
+
     // MARK: - 按偏移距排列
 
     do {
