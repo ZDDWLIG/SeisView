@@ -4,7 +4,7 @@ import Foundation
 /// 新增任何用户可见文案都必须先在这里加 case，再在 zhTable/enTable 两张表里补齐。
 public enum S: String, CaseIterable, Sendable {
     // 菜单（我们自己的）
-    case menuFileOpen, menuFileCompare
+    case menuFileOpen, menuFileCompare, menuFileDirectory
     case menuView, menuViewReset, menuViewHeaderToggle, menuViewLanguage
     case menuLangChinese, menuLangEnglish
     case menuNav, menuNavPrevShot, menuNavNextShot
@@ -36,6 +36,17 @@ public enum S: String, CaseIterable, Sendable {
     case tbSpectrum, spectrumLocal, spectrumGlobal, spectrumTitle
     case spectrumXAxis, spectrumYAxis, spectrumXRange, spectrumYRange
     case spectrumNormalize, spectrumAuto, spectrumUnitHz, spectrumUnitDb
+
+    // 带通滤波弹窗
+    case tbFilter, tbFilterHelp
+    case filterTitle, filterLowCut, filterHighCut, filterApply, filterClear, filterActive, filterNyquist
+
+    // 观测系统弹窗
+    case tbObservation, tbObservationHelp
+    case obsTitle, obsShots, obsReceivers, obsClickHint
+
+    // 目录浏览器
+    case dirUp, dirEmptyHint
 
     // 缩放条
     case zoomTraceAxis, zoomTraceAxisHelp, zoomTimeAxis, zoomTimeAxisHelp

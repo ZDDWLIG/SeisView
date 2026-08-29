@@ -20,15 +20,40 @@ public struct OffsetIndex: Sendable {
     }
 }
 
+/// offset 置换 + 观测系统布局的合并结果（一次道头扫描同时产出，避免二次全扫）。
+public struct OffsetAndObservation: Sendable {
+    public let offset: OffsetIndex
+    public let observation: ObservationLayout
+    public init(offset: OffsetIndex, observation: ObservationLayout) {
+        self.offset = offset; self.observation = observation
+    }
+}
+
 public enum OffsetIndexBuilder {
     /// 对每个 shot 读该炮道头，产出两套排列（有符号 offset 升序、绝对值 offset 升序）。
     /// 有符号：排序键 (offset, 道号)，并列按道号稳定。
     /// 绝对值：排序键 (|offset|, offset, 道号)，|offset| 并列时负 offset 在前。
     /// 输入 shots 必须已按 firstTrace 升序（ShotIndex 的产物即如此）。
     public static func build(shots: [Shot], source: TraceHeaderSource) -> OffsetIndex {
+        scan(shots: shots, source: source).offset
+    }
+
+    /// 一次读道头同时产出 offset 置换 + 观测系统布局（炮点/检波点）。
+    /// 观测系统不再单独全扫大文件，点击观测系统按钮即可秒出。
+    public static func buildFull(shots: [Shot], source: TraceHeaderSource) -> OffsetAndObservation {
+        scan(shots: shots, source: source)
+    }
+
+    private static func scan(shots: [Shot], source: TraceHeaderSource) -> OffsetAndObservation {
         var permSigned: [Int] = []
         var permAbs: [Int] = []
         var starts: [Int] = []
+        var shotPoints: [GeoPoint] = []
+        var shotElevations: [Double] = []
+        var receiverIndex: [GeoPoint: Int] = [:]
+        var receiverPoints: [GeoPoint] = []
+        var receiverElevations: [Double] = []
+        var shotReceivers: [[Int]] = []
         for shot in shots {
             starts.append(permSigned.count)
             let headers = source.readTraceHeaders(range: shot.firstTrace..<(shot.firstTrace + shot.count))
@@ -40,9 +65,31 @@ public enum OffsetIndexBuilder {
             }
             permSigned.append(contentsOf: sortedSigned.map { $0.trace })
             permAbs.append(contentsOf: sortedAbs.map { $0.trace })
+            // 观测系统顺带采集：炮点取该炮首道源坐标；检波点按接收坐标全局去重，
+            // 并记录该炮覆盖的检波点下标（供点击炮点高亮）。
+            if let first = headers.first {
+                shotPoints.append(GeoPoint(x: first.sourceX, y: first.sourceY))
+                shotElevations.append(first.sourceElevationValue)
+            }
+            var shotSet = Set<Int>()
+            var indices: [Int] = []
+            for h in headers {
+                let rp = GeoPoint(x: h.receiverX, y: h.receiverY)
+                let idx: Int
+                if let e = receiverIndex[rp] { idx = e }
+                else {
+                    idx = receiverPoints.count; receiverIndex[rp] = idx; receiverPoints.append(rp)
+                    receiverElevations.append(h.receiverElevationValue)
+                }
+                if shotSet.insert(idx).inserted { indices.append(idx) }
+            }
+            shotReceivers.append(indices)
         }
         starts.append(permSigned.count)
-        return OffsetIndex(permSigned: permSigned, permAbs: permAbs, shotStarts: starts)
+        return OffsetAndObservation(
+            offset: OffsetIndex(permSigned: permSigned, permAbs: permAbs, shotStarts: starts),
+            observation: ObservationLayout(shots: shotPoints, receivers: receiverPoints, shotReceivers: shotReceivers,
+                                           shotElevations: shotElevations, receiverElevations: receiverElevations))
     }
 }
 

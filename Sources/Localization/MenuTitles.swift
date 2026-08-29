@@ -3,7 +3,7 @@ import Foundation
 /// 参与「按当前标题反查」的 key 子集：只有菜单标题在内。
 /// 刻意不放工具栏文案——`调色板`/`缩放` 这类词在别处也出现，全表反查会误伤。
 public let menuTitleKeys: Set<S> = [
-    .menuFileOpen, .menuFileCompare,
+    .menuFileOpen, .menuFileCompare, .menuFileDirectory,
     .menuView, .menuViewReset, .menuViewHeaderToggle, .menuViewLanguage,
     .menuNav, .menuNavPrevShot, .menuNavNextShot,
     .menuHelpUsage,

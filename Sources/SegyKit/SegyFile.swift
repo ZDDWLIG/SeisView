@@ -51,7 +51,21 @@ public final class SegyFile {
         let off = Int(ByteOrderReader.i32(p + 36, order))
         let ns = Int(ByteOrderReader.u16(p + 114, order))
         let dt = Int(ByteOrderReader.u16(p + 116, order))
-        return TraceHeader(ffid: ffid, traceSeq: seq, cdp: cdp, offset: off, ns: ns, dtMicros: dt)
+        // 坐标字段（1-indexed 字节 → 0-indexed 偏移）：源 X 73–76 → p+72、源 Y 77–80 → p+76、
+        // 接收 X 81–84 → p+80、接收 Y 85–88 → p+84；坐标比例因子 71–72 → p+70（有符号 i16）。
+        let scalar = Int(ByteOrderReader.i16(p + 70, order))
+        let sx = Int(ByteOrderReader.i32(p + 72, order))
+        let sy = Int(ByteOrderReader.i32(p + 76, order))
+        let gx = Int(ByteOrderReader.i32(p + 80, order))
+        let gy = Int(ByteOrderReader.i32(p + 84, order))
+        // 高程字段：检波点高程 41–44 → p+40、源地表高程 45–48 → p+44；
+        // 高程比例因子 69–70 → p+68（与坐标比例因子分离）。
+        let recElev = Int(ByteOrderReader.i32(p + 40, order))
+        let srcElev = Int(ByteOrderReader.i32(p + 44, order))
+        let elevScalar = Int(ByteOrderReader.i16(p + 68, order))
+        return TraceHeader(ffid: ffid, traceSeq: seq, cdp: cdp, offset: off, ns: ns, dtMicros: dt,
+                           sx: sx, sy: sy, gx: gx, gy: gy, coordScalar: scalar,
+                           receiverElevation: recElev, sourceElevation: srcElev, elevationScalar: elevScalar)
     }
 
     public static func open(url: URL) throws -> SegyFile {

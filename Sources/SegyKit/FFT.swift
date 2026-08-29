@@ -43,6 +43,60 @@ public enum FFT {
         return Spectrum(frequencies: freqs, amplitudes: amps, dtMicros: dtMicros, nSamples: m)
     }
 
+    /// 带通滤波：保留 [lowHz, highHz] 频带内的能量，其余置零。
+    /// 零填充到 2 的幂 → 前向 FFT → 频带掩码（带边余弦锥度抑制 Gibbs 振铃）→ 逆 FFT。
+    /// 返回与输入等长的实数序列。dtMicros<=0 或样本数<2 时无频率轴可算，原样返回。
+    public static func bandPass(_ samples: [Float], dtMicros: Int, lowHz: Double, highHz: Double) -> [Float] {
+        let m = samples.count
+        guard m > 1, dtMicros > 0 else { return samples }
+        let dt = Double(dtMicros) / 1e6
+        let nyquist = 1.0 / (2.0 * dt)
+        let lo = max(0, lowHz)
+        let hi = min(highHz, nyquist)
+        guard hi > lo else { return [Float](repeating: 0, count: m) }  // 频带整体在 Nyquist 之外 → 全零
+
+        let n = nextPowerOfTwo(m)
+        var re = [Double](repeating: 0, count: n)
+        var im = [Double](repeating: 0, count: n)
+        for k in 0..<m { re[k] = Double(samples[k]) }
+        fft(&re, &im)
+
+        // 频带掩码：k ∈ [0, n/2] 对应 f = k/(n·dt)，镜像 bin n−k 共享同一增益。
+        let taper = 0.05 * (hi - lo)
+        var gain = [Double](repeating: 0, count: n / 2 + 1)
+        for k in 0...(n / 2) {
+            let f = Double(k) / (Double(n) * dt)
+            gain[k] = taperGain(f, lo: lo, hi: hi, taper: taper)
+        }
+        for k in 0..<n {
+            let g = gain[k <= n / 2 ? k : n - k]
+            re[k] *= g
+            im[k] *= g
+        }
+
+        // 逆 FFT：IFFT(X) = conj(FFT(conj(X))) / n。
+        for k in 0..<n { im[k] = -im[k] }
+        fft(&re, &im)
+        for k in 0..<n { im[k] = -im[k] }
+        let inv = 1.0 / Double(n)
+        var out = [Float](repeating: 0, count: m)
+        for k in 0..<m { out[k] = Float(re[k] * inv) }
+        return out
+    }
+
+    /// 带边余弦锥度：带内为 1、带外为 0，过渡带 [edge−taper, edge] 用半余弦平滑过渡。
+    private static func taperGain(_ f: Double, lo: Double, hi: Double, taper: Double) -> Double {
+        if f < lo {
+            let x = (f - (lo - taper)) / taper
+            return x <= 0 ? 0 : (x >= 1 ? 1 : 0.5 * (1 - cos(.pi * x)))
+        }
+        if f > hi {
+            let x = (f - hi) / taper
+            return x <= 0 ? 1 : (x >= 1 ? 0 : 0.5 * (1 + cos(.pi * x)))
+        }
+        return 1
+    }
+
     private static func nextPowerOfTwo(_ v: Int) -> Int {
         var n = 1
         while n < v { n <<= 1 }

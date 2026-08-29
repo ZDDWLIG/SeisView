@@ -5,7 +5,7 @@ import Localization
 @MainActor
 func runAll() {
     let h = Harness()
-    h.check(SegyKit.version == "0.4.0", "SegyKit version")
+    h.check(SegyKit.version == "0.5.0", "SegyKit version")
 
     // 大端读取
     var beBytes: [UInt8] = [0x01, 0x02, 0x03, 0x04]
@@ -940,6 +940,153 @@ func runAll() {
             let th = SegyFile.parseTraceHeader(rb.baseAddress!, order: .big)
             h.check(th.offset == -2000, "offset 有符号解析：读出 -2000 而非无符号巨大值")
         }
+    }
+
+    // MARK: - 带通滤波
+    do {
+        let dtUs = 2000                       // fs=500Hz, Nyquist=250Hz
+        let n = 256
+        let fLow = 10.0, fHigh = 100.0
+        // 带内 30Hz 正弦应被保留
+        var sigIn = [Float](repeating: 0, count: n)
+        for k in 0..<n {
+            let t = Double(k) * Double(dtUs) / 1e6
+            sigIn[k] = Float(sin(2 * .pi * 30.0 * t))
+        }
+        let passed = FFT.bandPass(sigIn, dtMicros: dtUs, lowHz: fLow, highHz: fHigh)
+        let rmsPass = sqrt(passed.reduce(0) { $0 + Double($1) * Double($1) } / Double(n))
+        h.check(rmsPass > 0.3, "带通滤波保留带内正弦 (rms \(rmsPass))")
+
+        // 带外 200Hz 正弦应被滤除
+        var sigOut = [Float](repeating: 0, count: n)
+        for k in 0..<n {
+            let t = Double(k) * Double(dtUs) / 1e6
+            sigOut[k] = Float(sin(2 * .pi * 200.0 * t))
+        }
+        let blocked = FFT.bandPass(sigOut, dtMicros: dtUs, lowHz: fLow, highHz: fHigh)
+        let rmsBlock = sqrt(blocked.reduce(0) { $0 + Double($1) * Double($1) } / Double(n))
+        h.check(rmsBlock < 0.05, "带通滤波滤除带外正弦 (rms \(rmsBlock))")
+
+        // 直流：低截止 > 0 时应被滤除
+        let dc = FFT.bandPass([Float](repeating: 1, count: n), dtMicros: dtUs, lowHz: 5, highHz: 100)
+        let rmsDC = sqrt(dc.reduce(0) { $0 + Double($1) * Double($1) } / Double(n))
+        h.check(rmsDC < 0.01, "低截止>0 滤除直流 (rms \(rmsDC))")
+
+        // 全通（0–Nyquist）应近似恒等保留信号
+        let all = FFT.bandPass(sigIn, dtMicros: dtUs, lowHz: 0, highHz: 250)
+        let rmsAll = sqrt(all.reduce(0) { $0 + Double($1) * Double($1) } / Double(n))
+        h.check(rmsAll > 0.3, "全通近恒等保留信号")
+
+        // 退化输入不崩、且语义正确
+        h.check(FFT.bandPass([], dtMicros: 1000, lowHz: 0, highHz: 100).isEmpty, "bandPass 空输入")
+        h.check(FFT.bandPass([1.0], dtMicros: 1000, lowHz: 0, highHz: 100) == [1.0], "bandPass 单样本原样")
+        h.check(FFT.bandPass(sigIn, dtMicros: 0, lowHz: 0, highHz: 100) == sigIn, "bandPass dt=0 原样返回")
+        // 频带整体高于 Nyquist → 全零
+        let zz = FFT.bandPass(sigIn, dtMicros: dtUs, lowHz: 300, highHz: 400)
+        h.check(zz.allSatisfy { abs($0) < 1e-6 }, "bandPass 频带高于 Nyquist → 全零")
+
+        // Viewport 滤波字段
+        var fv = Viewport()
+        h.check(fv.filter == nil, "默认无滤波")
+        fv.filter = BandFilter(lowHz: 10, highHz: 80)
+        h.check(fv.filter == BandFilter(lowHz: 10, highHz: 80), "设置滤波参数")
+    }
+
+    // MARK: - 道头坐标解析
+    do {
+        var tr = [UInt8](repeating: 0, count: 240)
+        let scalar: Int16 = -10
+        withUnsafeBytes(of: scalar.bigEndian) { for (i, b) in $0.enumerated() { tr[70 + i] = b } }
+        func putI32(_ v: Int32, _ off: Int) {
+            withUnsafeBytes(of: v.bigEndian) { for (i, b) in $0.enumerated() { tr[off + i] = b } }
+        }
+        putI32(1000, 72); putI32(2000, 76); putI32(3000, 80); putI32(4000, 84)
+        // 高程：检波点高程 p+40、源地表高程 p+44、高程比例因子 p+68（i16）
+        putI32(1234, 40); putI32(5678, 44)
+        let elevScalar: Int16 = -10
+        withUnsafeBytes(of: elevScalar.bigEndian) { for (i, b) in $0.enumerated() { tr[68 + i] = b } }
+        tr.withUnsafeBytes { rb in
+            let th = SegyFile.parseTraceHeader(rb.baseAddress!, order: .big)
+            h.check(th.sx == 1000 && th.sy == 2000, "道头源坐标 sx/sy 解析")
+            h.check(th.gx == 3000 && th.gy == 4000, "道头接收坐标 gx/gy 解析")
+            h.check(th.coordScalar == -10, "道头坐标比例因子解析")
+            h.checkClose(th.sourceX, 100, 1e-9, "负标量坐标换算 sourceX=100")
+            h.checkClose(th.receiverY, 400, 1e-9, "负标量坐标换算 receiverY=400")
+            h.check(th.receiverElevation == 1234 && th.sourceElevation == 5678, "道头高程解析")
+            h.check(th.elevationScalar == -10, "道头高程比例因子解析")
+            h.checkClose(th.receiverElevationValue, 123.4, 1e-6, "负标量高程换算 receiver=123.4")
+            h.checkClose(th.sourceElevationValue, 567.8, 1e-6, "负标量高程换算 source=567.8")
+        }
+        h.checkClose(TraceHeader(ffid: 0, traceSeq: 0, cdp: 0, offset: 0, ns: 0, dtMicros: 0,
+                                 sx: 100, sy: 0, gx: 0, gy: 0, coordScalar: 100).sourceX, 10000, 1e-9,
+                     "正标量坐标相乘")
+        h.checkClose(TraceHeader(ffid: 0, traceSeq: 0, cdp: 0, offset: 0, ns: 0, dtMicros: 0,
+                                 sx: 100, sy: 0, gx: 0, gy: 0, coordScalar: 0).sourceX, 100, 1e-9,
+                     "零标量坐标原样")
+    }
+
+    // MARK: - 观测系统
+    do {
+        final class GeoSource: TraceHeaderSource {
+            let headers: [TraceHeader]
+            init(_ hs: [TraceHeader]) { self.headers = hs }
+            func readTraceHeaders(range: Range<Int>) -> [TraceHeader] { Array(headers[range]) }
+        }
+        // 2 炮：炮1(ffid=1, sx=100) 道0/1，炮2(ffid=2, sx=200) 道2/3；
+        // 检波点 gx：1000(道0), 2000(道1), 1000(道2 重复), 3000(道3)。
+        let hs = [
+            TraceHeader(ffid: 1, traceSeq: 0, cdp: 0, offset: 0, ns: 0, dtMicros: 0,
+                        sx: 100, sy: 10, gx: 1000, gy: 0, coordScalar: 0),
+            TraceHeader(ffid: 1, traceSeq: 1, cdp: 0, offset: 0, ns: 0, dtMicros: 0,
+                        sx: 100, sy: 10, gx: 2000, gy: 0, coordScalar: 0),
+            TraceHeader(ffid: 2, traceSeq: 2, cdp: 0, offset: 0, ns: 0, dtMicros: 0,
+                        sx: 200, sy: 20, gx: 1000, gy: 0, coordScalar: 0),
+            TraceHeader(ffid: 2, traceSeq: 3, cdp: 0, offset: 0, ns: 0, dtMicros: 0,
+                        sx: 200, sy: 20, gx: 3000, gy: 0, coordScalar: 0),
+        ]
+        let layout = ObservationBuilder.build(source: GeoSource(hs), nTraces: 4, chunk: 2)
+        h.check(layout.shots.count == 2, "观测：2 炮点")
+        h.check(layout.shots[0] == GeoPoint(x: 100, y: 10), "观测：炮点1 坐标")
+        h.check(layout.shots[1] == GeoPoint(x: 200, y: 20), "观测：炮点2 坐标")
+        h.check(layout.receivers.count == 3, "观测：3 个去重检波点（1000 重复）")
+        h.check(Set(layout.receivers) == Set([GeoPoint(x: 1000, y: 0), GeoPoint(x: 2000, y: 0), GeoPoint(x: 3000, y: 0)]),
+                "观测：检波点去重正确")
+        h.check(layout.shotReceivers.count == 2, "观测：每炮检波点映射")
+        h.check(layout.shotReceivers[0] == [0, 1], "观测：炮1 检波点下标")
+        h.check(layout.shotReceivers[1] == [0, 2], "观测：炮2 检波点下标")
+        let empty = ObservationBuilder.build(source: GeoSource([]), nTraces: 0)
+        h.check(empty.shots.isEmpty && empty.receivers.isEmpty, "观测：空输入空输出")
+    }
+
+    // MARK: - offset 扫描顺带产出观测系统（buildFull）
+    do {
+        final class FullSource: TraceHeaderSource {
+            let headers: [TraceHeader]
+            init(_ hs: [TraceHeader]) { self.headers = hs }
+            func readTraceHeaders(range: Range<Int>) -> [TraceHeader] { Array(headers[range]) }
+        }
+        // 2 炮各 2 道，带 offset 与坐标
+        let hs = [
+            TraceHeader(ffid: 1, traceSeq: 0, cdp: 0, offset: 200, ns: 0, dtMicros: 0,
+                        sx: 100, sy: 10, gx: 1000, gy: 0, coordScalar: 0),
+            TraceHeader(ffid: 1, traceSeq: 1, cdp: 0, offset: 100, ns: 0, dtMicros: 0,
+                        sx: 100, sy: 10, gx: 2000, gy: 0, coordScalar: 0),
+            TraceHeader(ffid: 2, traceSeq: 2, cdp: 0, offset: -50, ns: 0, dtMicros: 0,
+                        sx: 200, sy: 20, gx: 1000, gy: 0, coordScalar: 0),
+            TraceHeader(ffid: 2, traceSeq: 3, cdp: 0, offset: 10, ns: 0, dtMicros: 0,
+                        sx: 200, sy: 20, gx: 3000, gy: 0, coordScalar: 0),
+        ]
+        let shots = [Shot(ffid: 1, firstTrace: 0, count: 2),
+                     Shot(ffid: 2, firstTrace: 2, count: 2)]
+        let both = OffsetIndexBuilder.buildFull(shots: shots, source: FullSource(hs))
+        h.check(both.offset.permSigned == [1, 0, 2, 3], "buildFull：offset 置换仍正确")
+        h.check(both.observation.shots.count == 2, "buildFull：2 炮点")
+        h.check(both.observation.shots[0] == GeoPoint(x: 100, y: 10), "buildFull：炮点1 坐标")
+        h.check(both.observation.receivers.count == 3, "buildFull：去重 3 检波点")
+        h.check(Set(both.observation.receivers) == Set([GeoPoint(x: 1000, y: 0), GeoPoint(x: 2000, y: 0), GeoPoint(x: 3000, y: 0)]),
+                "buildFull：检波点去重正确")
+        h.check(both.observation.shotReceivers[0] == [0, 1], "buildFull：炮1 检波点下标")
+        h.check(both.observation.shotReceivers[1] == [0, 2], "buildFull：炮2 检波点下标")
     }
 
     h.finish()

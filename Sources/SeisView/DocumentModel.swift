@@ -18,6 +18,14 @@ enum CompareMode: Hashable {
     case sideBySide
 }
 
+/// 目录浏览器的一项：子文件夹或 sgy 文件。
+struct BrowserEntry: Identifiable {
+    let name: String
+    let url: URL
+    let isDirectory: Bool
+    var id: URL { url }
+}
+
 /// App 自身产生的、非 SegyKit 的错误。携带 key 与参数，渲染推迟到视图层，
 /// 这样切语言时已显示的报错也会跟着变。nested 保存底层错误，渲染时再按当前语言翻译，
 /// 避免把 SegyError 的英文描述提前拼进 args。
@@ -63,6 +71,14 @@ final class DocumentModel: ObservableObject {
     @Published var spectrumResult: SpectrumResult?
     /// 频谱局部框选模式：为 true 时在剖面上框选矩形、松开后计算该区域频谱（一次性，完成后自动退出）。
     @Published var spectrumLocalMode = false
+    /// 观测系统弹窗的数据（非 nil 时弹出 sheet）。
+    @Published var observation: ObservationResult?
+    /// 观测系统扫描是否进行中（供按钮禁用 + 提示）。
+    @Published var observationBuilding = false
+    /// 目录浏览器（文件菜单「目录」）：侧栏开关 + 当前目录 + 目录项。
+    @Published var showDirectoryBrowser = false
+    @Published var browserDir: URL?
+    @Published var browserEntries: [BrowserEntry] = []
     let reader: TraceReader? = nil
     let cursor = CursorStore()
     /// 图像缓存：按文件分桶，键为完整 viewport（含 gain/palette）。
@@ -71,16 +87,20 @@ final class DocumentModel: ObservableObject {
     /// 解码+分箱缓存：键只含几何（firstTrace/traceSpan/firstSample/sampleSpan），**不含增益**。
     /// 拖百分比滑块时几何没变，靠它跳过 pread + 解码 + 分箱，只重跑增益与栅格化。
     private var binnedCache: [URL: (key: GeomKey, binned: Binned)] = [:]
+    /// 观测系统布局缓存：offset 索引扫描时顺带产出，点「观测系统」直接秒出，不再二次全扫。
+    private var cachedObservation: ObservationLayout?
 
     /// 决定解码结果的那部分视口状态。增益/调色板不在其中——它们只影响之后的着色。
     /// traceOrder 必须纳入：不同排列产生不同几何，漏掉会复用旧排列的分箱结果 → 图像错乱。
     private struct GeomKey: Equatable {
         let firstTrace: Int, traceSpan: Int, firstSample: Int, sampleSpan: Int
         let traceOrder: TraceOrder
+        let filter: BandFilter?
         init(_ v: Viewport) {
             firstTrace = v.firstTrace; traceSpan = v.traceSpan
             firstSample = v.firstSample; sampleSpan = v.sampleSpan
             traceOrder = v.traceOrder
+            filter = v.filter
         }
     }
 
@@ -104,6 +124,9 @@ final class DocumentModel: ObservableObject {
             spectrumLocalMode = false
             spectrumResult = nil
             singleTrace = nil
+            observation = nil
+            observationBuilding = false
+            cachedObservation = nil
             error = nil
             imageCache.removeAll(); binnedCache.removeAll()
             buildShots()
@@ -140,6 +163,9 @@ final class DocumentModel: ObservableObject {
             spectrumLocalMode = false
             spectrumResult = nil
             singleTrace = nil
+            observation = nil
+            observationBuilding = false
+            cachedObservation = nil
             error = nil
             imageCache.removeAll(); binnedCache.removeAll()
             buildShots()
@@ -267,6 +293,13 @@ final class DocumentModel: ObservableObject {
         viewport = v
     }
 
+    /// 设置/清除带通滤波。整体重赋值 viewport 触发重渲染，缓存键含 filter 自动失效。
+    func setFilter(_ filter: BandFilter?) {
+        var v = viewport
+        v.filter = filter
+        viewport = v
+    }
+
     func render() -> CGImage? {
         guard let f = file else { return nil }
         return render(file: f, viewport: viewport)
@@ -324,10 +357,27 @@ final class DocumentModel: ObservableObject {
         } else {
             data = r.readDecoded(traceRange: plan.traceRange, sampleRange: plan.sampleRange)
         }
-        let b = Decimator.minMax(data, ns: plan.decodedNs,
+        // 带通滤波必须在分箱**之前**作用于完整采样，分箱后再滤会混叠。
+        let filteredData = applyFilter(data, ns: plan.decodedNs, nTraces: plan.traceRange.count,
+                                       dtMicros: file.geometry.dtMicros, filter: viewport.filter)
+        let b = Decimator.minMax(filteredData, ns: plan.decodedNs,
                                  nTraces: plan.traceRange.count, h: plan.binHeight)
         binnedCache[file.url] = (key: key, binned: b)
         return b
+    }
+
+    /// 逐道带通滤波（仅剖面）。filter == nil 时原样返回。
+    private func applyFilter(_ data: [Float], ns: Int, nTraces: Int, dtMicros: Int, filter: BandFilter?) -> [Float] {
+        guard let band = filter, ns > 0 else { return data }
+        var out = [Float]()
+        out.reserveCapacity(data.count)
+        for t in 0..<nTraces {
+            let start = t * ns
+            let trace = Array(data[start..<(start + ns)])
+            out.append(contentsOf: FFT.bandPass(trace, dtMicros: dtMicros,
+                                                lowHz: band.lowHz, highHz: band.highHz))
+        }
+        return out
     }
 
     // MARK: - 炮导航
@@ -371,22 +421,27 @@ final class DocumentModel: ObservableObject {
         }
     }
 
-    /// 构建 offset 索引：后台读所有道头、炮内 offset 排序。仿 buildShots，url 比对丢过期结果。
+    /// 构建 offset 索引：后台读所有道头、炮内 offset 排序，**顺带产出观测系统布局**。
+    /// 仿 buildShots，url 比对丢过期结果。
     func buildOffsetIndex() {
         guard let f = file else { return }
         let url = f.url
         let builtShots = shots
         offsetIndex = nil
         offsetIndexReady = false
+        cachedObservation = nil
         Task.detached(priority: .userInitiated) { [weak self] in
             let result = Result {
                 let reopened = try SegyFile.open(url: url)
                 let reader = TraceReader(file: reopened)
-                return OffsetIndexBuilder.build(shots: builtShots, source: reader)
+                return OffsetIndexBuilder.buildFull(shots: builtShots, source: reader)
             }
             await MainActor.run {
                 guard let self, self.file?.url == url else { return }
-                self.offsetIndex = (try? result.get())
+                if let both = try? result.get() {
+                    self.offsetIndex = both.offset
+                    self.cachedObservation = both.observation
+                }
                 self.offsetIndexReady = true
             }
         }
@@ -487,6 +542,89 @@ final class DocumentModel: ObservableObject {
     func goToPreviousShot() { goToShot(currentShotIndex - 1) }
 
     func goToNextShot() { goToShot(currentShotIndex + 1) }
+
+    // MARK: - 观测系统
+
+    /// 弹出观测系统。优先用 offset 索引扫描时已缓存的布局（秒出）；缓存缺失时
+    /// （炮索引构建失败 / 尚未完成）退回单独后台全扫。只作用于 files.first。
+    func buildObservation() {
+        guard let f = file, !observationBuilding else { return }
+        if let cached = cachedObservation {
+            observation = ObservationResult(layout: cached)
+            return
+        }
+        let url = f.url
+        let nTraces = f.geometry.nTraces
+        observationBuilding = true
+        Task.detached(priority: .userInitiated) { [weak self] in
+            let result = Result<ObservationLayout, Error> {
+                let reopened = try SegyFile.open(url: url)
+                let reader = TraceReader(file: reopened)
+                return ObservationBuilder.build(source: reader, nTraces: nTraces)
+            }
+            await MainActor.run {
+                guard let self, self.file?.url == url else { return }
+                self.observationBuilding = false
+                self.observation = (try? result.get()).map { ObservationResult(layout: $0) }
+            }
+        }
+    }
+
+    // MARK: - 目录浏览器
+
+    /// 打开/关闭目录侧栏。打开时定位到当前 sgy 文件所在目录。
+    func toggleDirectoryBrowser(_ on: Bool) {
+        showDirectoryBrowser = on
+        if on, let f = file {
+            loadDirectory(f.url.deletingLastPathComponent())
+        }
+    }
+
+    /// 列出目录下的子文件夹 + sgy 文件（文件夹在前，各自按 Finder 语义排序）。
+    func loadDirectory(_ dir: URL) {
+        browserDir = dir
+        let fm = FileManager.default
+        let keys: [URLResourceKey] = [.isDirectoryKey]
+        guard let contents = try? fm.contentsOfDirectory(at: dir, includingPropertiesForKeys: keys,
+                                                         options: [.skipsHiddenFiles]) else {
+            browserEntries = []
+            return
+        }
+        var dirs: [BrowserEntry] = []
+        var files: [BrowserEntry] = []
+        for url in contents {
+            let isDir = (try? url.resourceValues(forKeys: Set(keys)).isDirectory) ?? false
+            let name = url.lastPathComponent
+            if isDir {
+                dirs.append(BrowserEntry(name: name, url: url, isDirectory: true))
+            } else if Self.isSegy(url) {
+                files.append(BrowserEntry(name: name, url: url, isDirectory: false))
+            }
+        }
+        dirs.sort { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
+        files.sort { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
+        browserEntries = dirs + files
+    }
+
+    /// 点击目录项：文件夹进入下一级，sgy 文件直接打开。
+    func openBrowserEntry(_ entry: BrowserEntry) {
+        if entry.isDirectory {
+            loadDirectory(entry.url)
+        } else {
+            open(entry.url)
+        }
+    }
+
+    /// 返回上一级目录。
+    func browserGoUp() {
+        guard let dir = browserDir else { return }
+        loadDirectory(dir.deletingLastPathComponent())
+    }
+
+    private static func isSegy(_ url: URL) -> Bool {
+        let ext = url.pathExtension.lowercased()
+        return ext == "sgy" || ext == "segy"
+    }
 
     // MARK: - 道头检查
 

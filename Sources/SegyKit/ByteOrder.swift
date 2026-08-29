@@ -5,6 +5,11 @@ public enum ByteOrderReader {
         return o == .big ? UInt16(bigEndian: v) : UInt16(littleEndian: v)
     }
     @inlinable
+    public static func i16(_ p: UnsafeRawPointer, _ o: ByteOrder) -> Int16 {
+        let v = p.loadUnaligned(as: Int16.self)
+        return o == .big ? Int16(bigEndian: v) : Int16(littleEndian: v)
+    }
+    @inlinable
     public static func u32(_ p: UnsafeRawPointer, _ o: ByteOrder) -> UInt32 {
         let v = p.loadUnaligned(as: UInt32.self)
         return o == .big ? UInt32(bigEndian: v) : UInt32(littleEndian: v)

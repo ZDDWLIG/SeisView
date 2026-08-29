@@ -30,6 +30,11 @@ struct SeisViewApp: App {
                         model.addForCompare(url)
                     }
                 }.keyboardShortcut("o", modifiers: [.command, .shift])
+                Toggle(l10n(.menuFileDirectory), isOn: Binding(
+                    get: { model.showDirectoryBrowser },
+                    set: { model.toggleDirectoryBrowser($0) }
+                ))
+                .disabled(model.file == nil)
             }
             CommandMenu(l10n(.menuView)) {
                 Button(l10n(.menuViewReset)) { model.resetView() }
@@ -68,6 +73,7 @@ struct SeisViewApp: App {
 struct ContentView: View {
     @ObservedObject var model: DocumentModel
     @ObservedObject var l10n: L10n
+    @State private var showFilterSheet = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -79,6 +85,10 @@ struct ContentView: View {
                 Text(errorMessage(e, l10n)).foregroundColor(.red).padding()
             } else if model.compareMode != .single, model.files.count >= 2 {
                 HStack(spacing: 0) {
+                    if model.showDirectoryBrowser {
+                        DirectoryBrowser(model: model, l10n: l10n).frame(width: 250)
+                        Divider()
+                    }
                     ScrolledSection(model: model,
                                     totalTraces: model.files[0].geometry.nTraces,
                                     totalSamples: model.files[0].geometry.ns) {
@@ -93,6 +103,10 @@ struct ContentView: View {
                 StatusBar(model: model, l10n: l10n, nTraces: model.files[0].geometry.nTraces)
             } else if let f = model.file {
                 HStack(spacing: 0) {
+                    if model.showDirectoryBrowser {
+                        DirectoryBrowser(model: model, l10n: l10n).frame(width: 250)
+                        Divider()
+                    }
                     ScrolledSection(model: model,
                                     totalTraces: f.geometry.nTraces,
                                     totalSamples: f.geometry.ns) {
@@ -215,6 +229,16 @@ struct ContentView: View {
                 }
                 .help(l10n(.tbSpectrum))
                 .disabled(model.file == nil)
+                Button { showFilterSheet = true } label: {
+                    Label(l10n(.tbFilter), systemImage: "line.3.horizontal.decrease.circle")
+                }
+                .help(l10n(.tbFilterHelp))
+                .disabled(model.file == nil)
+                Button { model.buildObservation() } label: {
+                    Label(l10n(.tbObservation), systemImage: "scope")
+                }
+                .help(l10n(.tbObservationHelp))
+                .disabled(model.file == nil || model.observationBuilding)
                 if model.compareMode != .single {
                     Button { model.resetView() } label: {
                         Label(l10n(.tbAlign), systemImage: "align.horizontal.center")
@@ -249,6 +273,15 @@ struct ContentView: View {
             set: { if $0 == nil { model.spectrumResult = nil } }
         )) { result in
             SpectrumView(result: result, l10n: l10n)
+        }
+        .sheet(isPresented: $showFilterSheet) {
+            FilterView(model: model, l10n: l10n)
+        }
+        .sheet(item: Binding(
+            get: { model.observation },
+            set: { if $0 == nil { model.observation = nil } }
+        )) { result in
+            ObservationView(layout: result.layout, l10n: l10n)
         }
     }
 }

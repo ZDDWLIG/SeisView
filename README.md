@@ -35,11 +35,15 @@ Opening a 9.5 GB, 589,248-trace file renders immediately — no full-file scan, 
 
 ## Features
 
-- Variable-density section display (grayscale, blue-white-red, red-white-black, brown-white-black palettes)
+- Variable-density section display (grayscale, blue-white-red, red-white-black, brown-white-black palettes) and wiggle-trace (variable-area) display
 - Horizontal panning, vertical zoom, gain control (percentile / AGC / per-trace / max-amplitude)
-- Trace header inspector (FFID, trace sequence, CDP, offset, sample count, etc., with byte positions)
-- Shot-based navigation by FFID
+- Trace header inspector (FFID, trace sequence, CDP, offset, sample count, coordinates, elevations, with byte positions)
+- Shot-based navigation by FFID; section order by trace, offset (signed), or offset (absolute)
 - Multi-file comparison, side by side (e.g. before/after denoising, input + mask)
+- Analysis tools: apparent-velocity measurement, single-trace waveform, amplitude spectrum (local / global, dB)
+- Band-pass filter (FFT-based low/high cut, applied to the section display)
+- Observation-system view: shot / receiver scatter plot, click a point for its (x, y, z), click a shot to highlight its receivers
+- Directory browser sidebar for stepping through SEG-Y files and subfolders
 - Automatic correction of files that declare IBM float but actually store IEEE
 
 ## Usage
@@ -152,12 +156,12 @@ swift scripts/make_icon.swift && iconutil -c icns Resources/SeisView.iconset -o 
 
 ## Known Limitations
 
-- No wiggle-trace display (variable density only)
 - Shot indexing may miss boundaries in files where a single shot has fewer than 256 traces
 - Offset-sorted display (byOffset) reorders traces within each shot, so the large contiguous read is lost and it renders slower than the default trace order
 - No overlay comparison — the multi-file view is side-by-side only
-- No manual override of sample count, format code, or byte order
-- No spectral analysis, image export, or data write-back (read-only viewer)
+- No data write-back (read-only viewer); the band-pass filter and gain are display-only
+- No image export
+- The observation-system view needs source/receiver coordinates (bytes 73–88) in the trace headers; without them all points collapse to the origin
 - No 3D volume display or slice browsing
 - Linux is not supported — for Windows, use the [SeisView-Win](https://github.com/ZDDWLIG/SeisView-Win) port
 

@@ -5,6 +5,7 @@ import Foundation
 public let zhTable: [S: String] = [
     .menuFileOpen: "打开 SEG-Y…",
     .menuFileCompare: "对比…",
+    .menuFileDirectory: "目录",
     .menuView: "视图",
     .menuViewReset: "重置视图",
     .menuViewHeaderToggle: "显示道头信息",
@@ -91,6 +92,26 @@ public let zhTable: [S: String] = [
     .spectrumUnitHz: "Hz",
     .spectrumUnitDb: "dB",
 
+    .tbFilter: "滤波",
+    .tbFilterHelp: "带通滤波：设置低/高截止频率，仅保留该频带内的信息",
+    .filterTitle: "带通滤波",
+    .filterLowCut: "低截止 (Hz)",
+    .filterHighCut: "高截止 (Hz)",
+    .filterApply: "应用",
+    .filterClear: "清除滤波",
+    .filterActive: "（已启用）",
+    .filterNyquist: "奈奎斯特 %@ Hz",
+
+    .tbObservation: "观测系统",
+    .tbObservationHelp: "观测系统：绘制炮点与检波点的散点图",
+    .obsTitle: "观测系统",
+    .obsShots: "炮点 %@",
+    .obsReceivers: "检波点 %@",
+    .obsClickHint: "点击炮点高亮其检波点，再点一次或点空白处取消",
+
+    .dirUp: "上一级目录",
+    .dirEmptyHint: "此文件夹无 sgy 文件",
+
     .zoomTraceAxis: "道方向",
     .zoomTraceAxisHelp: "道方向缩放：左拖=放大，右拖=显示更多道，松手回中",
     .zoomTimeAxis: "时间方向",
@@ -132,6 +153,7 @@ public let zhTable: [S: String] = [
 public let enTable: [S: String] = [
     .menuFileOpen: "Open SEG-Y…",
     .menuFileCompare: "Compare…",
+    .menuFileDirectory: "Directory",
     .menuView: "View",
     .menuViewReset: "Reset View",
     .menuViewHeaderToggle: "Show Trace Headers",
@@ -217,6 +239,26 @@ public let enTable: [S: String] = [
     .spectrumAuto: "Auto",
     .spectrumUnitHz: "Hz",
     .spectrumUnitDb: "dB",
+
+    .tbFilter: "Filter",
+    .tbFilterHelp: "Band-pass filter: set low/high cut frequencies to keep only that band",
+    .filterTitle: "Band-pass Filter",
+    .filterLowCut: "Low cut (Hz)",
+    .filterHighCut: "High cut (Hz)",
+    .filterApply: "Apply",
+    .filterClear: "Clear Filter",
+    .filterActive: "(active)",
+    .filterNyquist: "Nyquist %@ Hz",
+
+    .tbObservation: "Observation System",
+    .tbObservationHelp: "Observation system: plot shot and receiver points",
+    .obsTitle: "Observation System",
+    .obsShots: "Shot points %@",
+    .obsReceivers: "Receiver points %@",
+    .obsClickHint: "Click a shot to highlight its receivers; click again or on empty space to clear",
+
+    .dirUp: "Parent Directory",
+    .dirEmptyHint: "No SEG-Y files in this folder",
 
     .zoomTraceAxis: "Trace axis",
     .zoomTraceAxisHelp: "Trace-axis zoom: drag left to zoom in, right to show more traces; the handle re-centres on release",

@@ -37,3 +37,9 @@ struct SpectrumResult: Identifiable {
     let dtMicros: Int
     var id: Int { ns }
 }
+
+/// 观测系统结果：去重后的炮点/检波点。仅一份，固定 id 供 sheet(item:) 使用。
+struct ObservationResult: Identifiable {
+    let layout: ObservationLayout
+    var id: Int { 0 }
+}

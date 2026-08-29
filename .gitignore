@@ -1,6 +1,7 @@
 .build/
 dist/
 .superpowers/
+.claude/
 .DS_Store
 *.o
 Resources/SeisView.iconset/

@@ -1,6 +1,6 @@
 # SeisView — 开发与维护手册
 
-macOS 原生 SEG-Y / SGY 地震数据查看器，对标 Windows 的 SeiSee，核心是超大文件（10 GB 级、数十万道）的**即时显示**。纯 Swift，零第三方依赖。界面支持中文（简体）与 English，首次启动跟随系统语言，可在 View → Language 切换（即时生效、持久记忆），并内置双语使用说明（⌘?）。剖面横向排列支持三种：按道号 / 按偏移距（有符号）/ 按偏移距（绝对值）。内置四项分析功能：默认最大幅值（maxAbs）归一化、视速度测算（两点连亮绿线显示 v）、wiggle 波形变面积 + 单道放大波形、振幅谱（分贝谱，局部框选 / 全局）。
+macOS 原生 SEG-Y / SGY 地震数据查看器，对标 Windows 的 SeiSee，核心是超大文件（10 GB 级、数十万道）的**即时显示**。纯 Swift，零第三方依赖。界面支持中文（简体）与 English，首次启动跟随系统语言，可在 View → Language 切换（即时生效、持久记忆），并内置双语使用说明（⌘?）。剖面横向排列支持三种：按道号 / 按偏移距（有符号）/ 按偏移距（绝对值）。内置分析功能：默认最大幅值（maxAbs）归一化、视速度测算（两点连亮绿线显示 v）、wiggle 波形变面积 + 单道放大波形、振幅谱（分贝谱，局部框选 / 全局）、带通滤波（FFT，低/高截止，仅剖面）、观测系统（炮点/检波点散点图 + 点击高亮 + xyz 坐标）。另有目录浏览器侧栏（文件菜单「目录」）。
 
 ---
 
@@ -39,8 +39,9 @@ SegyKit（纯核心，零 UI 依赖，可独立测试）
 ├── ScrollMetrics.swift 滚动条滑块几何（长度/偏移/像素↔索引反算）
 ├── ShotIndex.swift    FFID 炮索引（抽样 + 二分）
 ├── TraceOrder.swift  剖面排列方式（byTrace / byOffset / byOffsetAbs）
-├── OffsetIndex.swift 炮内 offset 排序置换（有符号/绝对值两套 perm）+ 每炮起始位置
-├── FFT.swift            radix-2 FFT + 单边振幅谱（Hann 窗 + 零填充到 2 的幂）
+├── OffsetIndex.swift 炮内 offset 排序置换（有符号/绝对值两套 perm）+ 每炮起始位置（顺带产出观测系统布局）
+├── Observation.swift 观测系统扫描（炮点/检波点去重 + 每炮覆盖的检波点下标 + 高程）
+├── FFT.swift            radix-2 FFT + 单边振幅谱（Hann 窗 + 零填充）+ 带通滤波（带边余弦锥度 + 逆 FFT）
 ├── Velocity.swift       视速度纯计算（|Δoffset| / (|Δsample|·dt) → m/s，Δt/Δx 为零返回 nil）
 └── WiggleRenderer.swift 波形变面积渲染（原始采样 → CGImage，每道 maxAbs 归一化，黑白）
 
@@ -66,7 +67,10 @@ SeisView（AppKit + SwiftUI）
 ├── PlotView.swift       自绘坐标图（AppKit NSView：曲线 + 坐标轴 + 刻度数值）
 ├── PlotAxes.swift       轴刻度纯函数（niceTicks / compactNum）
 ├── SingleTraceView.swift 单道放大波形弹窗（sheet，横轴时间/纵轴振幅）
-└── SpectrumView.swift   振幅谱弹窗（sheet，分贝谱 + x/y 轴范围）
+├── SpectrumView.swift   振幅谱弹窗（sheet，分贝谱 + x/y 轴范围）
+├── FilterView.swift     带通滤波弹窗（sheet，低/高截止 + 应用/清除）
+├── ObservationView.swift 观测系统散点图弹窗（ScatterNSView：炮红/检蓝 + 点击高亮 + xyz 坐标框）
+└── DirectoryBrowser.swift 目录浏览器侧栏（列子文件夹 + sgy 文件，进入/返回上一级）
 
 SegyKitTests（自定义 harness 可执行目标，非 XCTest）
 ├── Harness.swift      @MainActor 断言工具（check/checkClose/checkRel/finish）
@@ -139,12 +143,14 @@ swift scripts/make_icon.swift && iconutil -c icns Resources/SeisView.iconset -o 
 
 ---
 
-## 分析功能技术事实（视速度 / wiggle / 单道 / 振幅谱）
+## 分析功能技术事实（视速度 / wiggle / 单道 / 振幅谱 / 带通滤波 / 观测系统）
 
 - **FFT**：radix-2 Cooley–Tukey，Hann 窗（基于原始长度 m）后零填充到 2 的幂，单边振幅 |X|，频率轴 f[k] = k/(N·dt)、Nyquist = 1/(2dt)。真实道 ns=4000 → N=4096 走零填充分支（有测试）。
 - **视速度**：v = |Δoffset| / (|Δsample|·dt)。offset 用道头**有符号 int32**（字节 37–40）；单位继承 offset 字段（通常 m/s）。Δsample=0 或 Δoffset=0 返回 nil（不画线）。
 - **wiggle 渲染**：图像宽**必须 == 道数**（每道 1px），**不要加宽**。加宽（width>nTraces）会让 NSImageView 按图像固有尺寸显示，剖面被横向拉伸、可见道变少——0.4.0 修过的真 bug。每道独立 maxAbs 归一化，ampScale = max(1, colW/2−1)（满幅度 = 一整道宽，稠密无缝）。
 - **振幅谱合成**：先叠（选中道取平均）后 FFT；全局/大区间**均匀抽 ≤400 道**（`SpectrumBuilder.sampledIndices`）。分贝谱 dB = 20·log10(amp/maxAmp)（峰值 0 dB），默认 x 范围 0–100 Hz。频谱计算在 `Task.detached` 里 reopen 文件 + url 比对（同 `buildShots`，`computeSpectrum`）。
+- **带通滤波**：零填充到 2 的幂 → 前向 FFT → 频带掩码（带边余弦锥度抑制 Gibbs 振铃）→ 逆 FFT。**仅作用于剖面**（wiggle/单道/频谱仍用原始数据）。在 `DocumentModel.binned` 里、**min/max 分箱之前**按道施加（分箱后再滤会混叠）；参数放 `Viewport.filter: BandFilter?`，参与 imageCache/binnedCache 键，改滤波自动失效缓存。
+- **观测系统**：炮点 = 源坐标 (sx,sy)、检波点 = 接收坐标 (gx,gy)，各自去重；高程 z 用**独立的高程比例因子（字节 69–70）**换算，与坐标比例因子（71–72）分离。扫描在 `OffsetIndexBuilder.buildFull` 里**顺带**完成（同一次读道头，零额外 I/O），`ObservationBuilder` 是兜底路径。点炮点高亮其检波点（每炮覆盖的检波点下标 `shotReceivers`）。散点图轴刻度去指数（mantissa + 轴端 ×10^k）。
 
 ---
 
@@ -189,6 +195,9 @@ swift scripts/make_icon.swift && iconutil -c icns Resources/SeisView.iconset -o 
 - 对比模式下「排列」选择禁用（offset 索引只按 `files.first` 建，避免各 pane 串用偏移量）
 - offset 索引无进度提示：打开文件后后台读全部道头，大文件需数秒，构建完成前 offset 选项禁用
 - 未 Apple 公证（免费路，ad-hoc 签名；接收方首次右键→打开）
+- 目录浏览器**同步**列出当前目录（海量文件的大目录可能瞬时卡顿，未后台化）；侧栏宽固定 250、不可拖动
+- 观测系统需要道头源/接收坐标（字节 73–88）；无坐标时所有点塌缩到原点。高程按独立高程比例因子（69–70）换算，若数据用坐标比例因子统一缩放会差一个量级
+- 带通滤波仅作用于剖面（wiggle/单道/振幅谱仍用原始数据）；滤波开启时平移/缩放每屏重算 FFT，略慢
 
 ---
 
@@ -246,3 +255,4 @@ swift scripts/make_icon.swift && iconutil -c icns Resources/SeisView.iconset -o 
 23. 弹窗（单道/频谱）用 sheet + 右上角圆圈叉关闭、可拉伸；不再用「重置视图」按钮作关闭。
 24. 视速度/频谱/单道的瞬时状态放 `DocumentModel`（非 `Viewport`）；`zoomRectMode` 与 `spectrumLocalMode` 互斥。
 25. 版本 0.4.0；commit message / release notes 一律英文（代码注释仍中文，界面文案 zh/en 双语）。
+26. 版本 0.5.0：带通滤波（FFT，仅剖面）、观测系统（炮/检散点 + 点击高亮 + xyz 坐标）、目录浏览器侧栏（文件菜单「目录」）。观测数据在 offset 索引那次全扫里顺带采集，点开观测系统秒出。

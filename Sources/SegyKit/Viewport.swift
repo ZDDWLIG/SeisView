@@ -1,5 +1,14 @@
 import Foundation
 
+/// 带通滤波参数。nil = 关闭滤波。
+public struct BandFilter: Equatable, Sendable {
+    public var lowHz: Double
+    public var highHz: Double
+    public init(lowHz: Double, highHz: Double) {
+        self.lowHz = lowHz; self.highHz = highHz
+    }
+}
+
 /// 视口状态：纯值类型，渲染是纯函数 (SegyFile, Viewport) → CGImage。
 /// 放在 SegyKit 而非 SeisView，是为了让测试 harness 够得着这里的纯逻辑
 /// （SeisView 是可执行 target，无法被 import）。
@@ -15,6 +24,8 @@ public struct Viewport: Equatable, Sendable {
     /// 百分位增益「保留百分比」，单位 %，范围 [90, 100]。真值只有它一个：
     /// gain 的百分位载荷由它派生（见 setClipPercent），两者不会漂移。
     public var clipPercent: Double = 98
+    /// 带通滤波（仅剖面显示）。nil = 不滤波。参与 Equatable，改它触发 imageCache 失效。
+    public var filter: BandFilter?
     /// 屏宽上限：任何情况下 traceSpan 都不超过它，绝不一次解码整炮/整文件。
     public static let maxTraceSpan = 1200
     public init() {}
